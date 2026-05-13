@@ -68,7 +68,7 @@ export const usePlayerStore = create<PlayerState>()(
         }),
       setVolume: (n) =>
         set((s) => {
-          s.volume = Math.max(0, Math.min(1, n));
+          s.volume = clamp(n, 0, 1);
           if (s.volume > 0) s.muted = false;
         }),
       setMuted: (b) =>
@@ -89,8 +89,8 @@ export const usePlayerStore = create<PlayerState>()(
         }),
       rememberPosition: (path, seconds) =>
         set((s) => {
-          if (!Number.isFinite(seconds)) return;
-          if (seconds > 5) s.positions[path] = seconds;
+          if (!path || !Number.isFinite(seconds)) return;
+          if (seconds > 5) s.positions[path] = Math.max(0, seconds);
           else delete s.positions[path];
         }),
       forgetPosition: (path) =>
