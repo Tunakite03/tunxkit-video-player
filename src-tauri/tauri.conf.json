@@ -1,0 +1,73 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Tunxkit Player",
+  "version": "0.1.0",
+  "identifier": "com.tunxkit.videoplayer",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Tunxkit Player",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 880,
+        "minHeight": 540,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "center": true,
+        "dragDropEnabled": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [
+            "**"
+          ],
+          "deny": []
+        }
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Video",
+    "copyright": "© 2026 Tunxkit",
+    "publisher": "Tunxkit",
+    "homepage": "https://tunxkit.local",
+    "shortDescription": "A modern, fast, beautiful desktop video player.",
+    "longDescription": "Tunxkit Player — a modern, fast and beautiful cross-platform desktop video player built with Tauri. Supports playlists, library, keyboard shortcuts, picture-in-picture, fullscreen, resume from last position, and more.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  }
+}
