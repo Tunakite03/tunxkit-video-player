@@ -27,7 +27,7 @@ const wrap = (node: React.ReactNode) => (
     <React.Suspense fallback={<Loading />}>{node}</React.Suspense>
 )
 
-const router = createBrowserRouter([
+export const router = createBrowserRouter([
     {
         path: '/',
         element: <AppShell />,

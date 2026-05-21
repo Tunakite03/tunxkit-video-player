@@ -1,7 +1,7 @@
 import * as React from "react";
 
 /**
- * Returns true if no pointer activity (move / click) has happened for `delayMs`.
+ * Returns true if no cursor/pointer activity (move / click) has happened for `delayMs`.
  * The container ref is the bounding region; pass the player wrapper.
  */
 export function useIdle(
@@ -20,8 +20,8 @@ export function useIdle(
     };
     reset();
     // Listen on the document while fullscreen is active. Some browsers dispatch
-    // fullscreen pointer activity to the document before the element target,
-    // which could leave the control bar hidden even after moving the mouse.
+    // fullscreen cursor/pointer activity to the document before the element target,
+    // which could leave the control bar hidden even after moving the cursor.
     const eventTarget: HTMLElement | Document =
       document.fullscreenElement === node ? document : node;
     eventTarget.addEventListener("mousemove", reset);

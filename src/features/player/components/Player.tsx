@@ -31,7 +31,6 @@ export function Player({ className }: PlayerProps) {
 
     const rememberPositionEnabled = useSettingsStore((s) => s.rememberPosition)
     const autoplayNext = useSettingsStore((s) => s.autoplayNext)
-    const defaultVolume = useSettingsStore((s) => s.defaultVolume)
     const defaultRate = useSettingsStore((s) => s.defaultPlaybackRate)
 
     const idle = useIdle(wrapperRef, 2500)
@@ -49,8 +48,10 @@ export function Player({ className }: PlayerProps) {
             resetMediaState()
             return
         }
+        const { volume, muted } = usePlayerStore.getState()
         video.src = toMediaSrc(trackPath)
-        video.volume = defaultVolume
+        video.volume = volume
+        video.muted = muted
         video.playbackRate = defaultRate
         const onLoaded = () => {
             const resumeAt = rememberPositionEnabled ? usePlayerStore.getState().positions[trackPath] : undefined
@@ -64,7 +65,7 @@ export function Player({ className }: PlayerProps) {
         return () => {
             video.removeEventListener('loadedmetadata', onLoaded)
         }
-    }, [defaultRate, defaultVolume, pushRecent, rememberPositionEnabled, resetMediaState, trackFile, trackPath])
+    }, [defaultRate, pushRecent, rememberPositionEnabled, resetMediaState, trackFile, trackPath])
 
     /* ---------- Persist position ---------- */
     React.useEffect(() => {
@@ -176,6 +177,7 @@ export function Player({ className }: PlayerProps) {
             ref={wrapperRef}
             className={cn(
                 'group relative flex h-full w-full items-center justify-center overflow-hidden bg-black',
+                track && !controlsVisible && 'cursor-none',
                 className,
             )}
             onDoubleClick={toggleFullscreen}

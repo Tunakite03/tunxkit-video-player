@@ -84,3 +84,19 @@ pub async fn scan_directory(path: String, recursive: bool) -> AppResult<Vec<Medi
 pub async fn get_media_info(path: String) -> AppResult<MediaFile> {
     to_media_file(PathBuf::from(path))
 }
+
+#[tauri::command]
+pub async fn get_startup_media_files() -> AppResult<Vec<MediaFile>> {
+    let mut files = Vec::new();
+
+    for arg in std::env::args_os().skip(1) {
+        let path = PathBuf::from(arg);
+        if path.is_file() && is_video(&path) {
+            if let Ok(file) = to_media_file(path) {
+                files.push(file);
+            }
+        }
+    }
+
+    Ok(files)
+}

@@ -25,6 +25,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::media::scan_directory,
             commands::media::get_media_info,
+            commands::media::get_startup_media_files,
             commands::system::show_in_folder,
         ])
         .setup(|app| {

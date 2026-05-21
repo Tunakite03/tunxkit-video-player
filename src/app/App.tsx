@@ -1,10 +1,10 @@
 import * as React from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Providers } from './providers'
-import { AppRouter } from './router'
+import { AppRouter, router } from './router'
 import { useUIStore } from '@/stores/ui-store'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
-import { getMediaInfo, pickVideoFiles, pickFolder, scanDirectory } from '@/lib/tauri'
+import { getMediaInfo, getStartupMediaFiles, pickVideoFiles, pickFolder, scanDirectory } from '@/lib/tauri'
 import { usePlaylistStore } from '@/features/playlist/store'
 import { toast } from 'sonner'
 
@@ -36,6 +36,33 @@ function GlobalShortcuts() {
             openShortcuts()
         }
     })
+    return null
+}
+
+function StartupMediaLoader() {
+    const setQueue = usePlaylistStore((s) => s.setQueue)
+
+    React.useEffect(() => {
+        let cancelled = false
+
+            ; (async () => {
+                try {
+                    const files = await getStartupMediaFiles()
+                    if (cancelled || files.length === 0) return
+
+                    setQueue(files, 0)
+                    await router.navigate('/player')
+                    toast.success(`Loaded ${files.length} file${files.length > 1 ? 's' : ''}`)
+                } catch {
+                    /* not in tauri or no startup files */
+                }
+            })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [setQueue])
+
     return null
 }
 
@@ -73,6 +100,7 @@ export function App() {
     return (
         <Providers>
             <GlobalShortcuts />
+            <StartupMediaLoader />
             <DropZone />
             <AppRouter />
         </Providers>

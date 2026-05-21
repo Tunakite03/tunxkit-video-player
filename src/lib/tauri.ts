@@ -70,6 +70,11 @@ export function getMediaInfo(path: string): Promise<MediaFile> {
   return invoke<MediaFile>("get_media_info", { path });
 }
 
+/** Fetch media files passed by the OS when launching via Open With. */
+export function getStartupMediaFiles(): Promise<MediaFile[]> {
+  return invoke<MediaFile[]>("get_startup_media_files");
+}
+
 /** Reveal a path in the OS file explorer. */
 export function showInFolder(path: string): Promise<void> {
   return invoke<void>("show_in_folder", { path });
