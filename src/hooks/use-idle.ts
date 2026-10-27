@@ -1,8 +1,9 @@
 import * as React from "react";
 
 /**
- * Returns true if no cursor/pointer activity (move / click) has happened for `delayMs`.
- * The container ref is the bounding region; pass the player wrapper.
+ * Returns true if no cursor/pointer/keyboard activity has happened for `delayMs`.
+ * The container ref is the bounding region for pointer activity; pass the player wrapper.
+ * Key presses anywhere in the window count as activity, since shortcuts are global.
  */
 export function useIdle(
   containerRef: React.RefObject<HTMLElement | null>,
@@ -19,26 +20,21 @@ export function useIdle(
       timer = window.setTimeout(() => setIdle(true), delayMs);
     };
     reset();
-    // Listen on the document while fullscreen is active. Some browsers dispatch
-    // fullscreen cursor/pointer activity to the document before the element target,
-    // which could leave the control bar hidden even after moving the cursor.
-    const eventTarget: HTMLElement | Document =
-      document.fullscreenElement === node ? document : node;
-    eventTarget.addEventListener("mousemove", reset);
-    eventTarget.addEventListener("pointermove", reset);
-    eventTarget.addEventListener("mousedown", reset);
-    eventTarget.addEventListener("pointerdown", reset);
-    eventTarget.addEventListener("touchstart", reset);
-    eventTarget.addEventListener("keydown", reset);
+    // Pointer events inside the wrapper bubble to it, including in fullscreen
+    // (the fullscreen element is the wrapper itself).
+    const pointerEvents = [
+      "pointermove",
+      "pointerdown",
+      "touchstart",
+      "wheel",
+    ] as const;
+    for (const name of pointerEvents) node.addEventListener(name, reset);
+    window.addEventListener("keydown", reset);
     document.addEventListener("fullscreenchange", reset);
     return () => {
       if (timer) window.clearTimeout(timer);
-      eventTarget.removeEventListener("mousemove", reset);
-      eventTarget.removeEventListener("pointermove", reset);
-      eventTarget.removeEventListener("mousedown", reset);
-      eventTarget.removeEventListener("pointerdown", reset);
-      eventTarget.removeEventListener("touchstart", reset);
-      eventTarget.removeEventListener("keydown", reset);
+      for (const name of pointerEvents) node.removeEventListener(name, reset);
+      window.removeEventListener("keydown", reset);
       document.removeEventListener("fullscreenchange", reset);
     };
   }, [containerRef, delayMs]);

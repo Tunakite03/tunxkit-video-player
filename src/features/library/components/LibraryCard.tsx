@@ -20,14 +20,21 @@ export function LibraryCard({ item, onPlay }: LibraryCardProps) {
         if (!inView || duration !== null) return
         const v = document.createElement('video')
         v.preload = 'metadata'
-        v.src = toMediaSrc(item.path)
-        const onMeta = () => {
-            if (isFinite(v.duration)) setDuration(v.duration)
+        v.muted = true
+        const release = () => {
+            v.removeEventListener('loadedmetadata', onMeta)
+            v.removeEventListener('error', release)
             v.removeAttribute('src')
             v.load()
         }
-        v.addEventListener('loadedmetadata', onMeta, { once: true })
-        v.addEventListener('error', () => v.removeAttribute('src'), { once: true })
+        const onMeta = () => {
+            if (isFinite(v.duration)) setDuration(v.duration)
+            release()
+        }
+        v.addEventListener('loadedmetadata', onMeta)
+        v.addEventListener('error', release)
+        v.src = toMediaSrc(item.path)
+        return release
     }, [inView, item.path, duration])
 
     return (

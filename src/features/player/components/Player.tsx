@@ -11,6 +11,9 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
 import { useIdle } from '@/hooks/use-idle'
 import { PlayerControls } from './PlayerControls'
 
+/** Positions this close to the end count as "finished" and are not resumed. */
+const END_THRESHOLD_SECONDS = 5
+
 interface PlayerProps {
     className?: string
 }
@@ -21,17 +24,17 @@ export function Player({ className }: PlayerProps) {
     const controller = useVideoController(videoRef)
     const track = usePlaylistStore(selectCurrentTrack)
     const next = usePlaylistStore((s) => s.next)
+    const prev = usePlaylistStore((s) => s.prev)
     const pushRecent = usePlaylistStore((s) => s.pushRecent)
     const togglePlaylist = useUIStore((s) => s.togglePlaylist)
 
     const setFullscreen = usePlayerStore((s) => s.setFullscreen)
     const rememberPosition = usePlayerStore((s) => s.rememberPosition)
+    const forgetPosition = usePlayerStore((s) => s.forgetPosition)
     const resetMediaState = usePlayerStore((s) => s.resetMediaState)
     const paused = usePlayerStore((s) => s.paused)
 
     const rememberPositionEnabled = useSettingsStore((s) => s.rememberPosition)
-    const autoplayNext = useSettingsStore((s) => s.autoplayNext)
-    const defaultRate = useSettingsStore((s) => s.defaultPlaybackRate)
 
     const idle = useIdle(wrapperRef, 2500)
     const controlsVisible = paused || !idle
@@ -42,20 +45,23 @@ export function Player({ className }: PlayerProps) {
     React.useEffect(() => {
         const video = videoRef.current
         if (!video) return
+        resetMediaState()
         if (!trackFile || !trackPath) {
             video.removeAttribute('src')
             video.load()
-            resetMediaState()
             return
         }
         const { volume, muted } = usePlayerStore.getState()
+        const { defaultPlaybackRate, rememberPosition: resume } = useSettingsStore.getState()
         video.src = toMediaSrc(trackPath)
         video.volume = volume
         video.muted = muted
-        video.playbackRate = defaultRate
+        video.defaultPlaybackRate = defaultPlaybackRate
+        video.playbackRate = defaultPlaybackRate
         const onLoaded = () => {
-            const resumeAt = rememberPositionEnabled ? usePlayerStore.getState().positions[trackPath] : undefined
-            if (resumeAt && Number.isFinite(resumeAt) && resumeAt < (video.duration || Infinity)) {
+            const resumeAt = resume ? usePlayerStore.getState().positions[trackPath] : undefined
+            const duration = Number.isFinite(video.duration) ? video.duration : Infinity
+            if (resumeAt && Number.isFinite(resumeAt) && resumeAt < duration - END_THRESHOLD_SECONDS) {
                 video.currentTime = resumeAt
             }
             video.play().catch(() => { })
@@ -65,14 +71,23 @@ export function Player({ className }: PlayerProps) {
         return () => {
             video.removeEventListener('loadedmetadata', onLoaded)
         }
-    }, [defaultRate, pushRecent, rememberPositionEnabled, resetMediaState, trackFile, trackPath])
+    }, [pushRecent, resetMediaState, trackFile, trackPath])
 
     /* ---------- Persist position ---------- */
     React.useEffect(() => {
         if (!rememberPositionEnabled || !trackPath) return
         const video = videoRef.current
         if (!video) return
-        const persistPosition = () => rememberPosition(trackPath, video.currentTime)
+        const persistPosition = () => {
+            // Ignore events fired while the next source is loading.
+            if (!video.currentSrc || video.readyState === HTMLMediaElement.HAVE_NOTHING) return
+            const { currentTime, duration } = video
+            if (video.ended || (Number.isFinite(duration) && duration - currentTime < END_THRESHOLD_SECONDS)) {
+                forgetPosition(trackPath)
+            } else {
+                rememberPosition(trackPath, currentTime)
+            }
+        }
         const id = window.setInterval(() => {
             if (!video.paused) persistPosition()
         }, 5000)
@@ -84,18 +99,41 @@ export function Player({ className }: PlayerProps) {
             video.removeEventListener('seeked', persistPosition)
             persistPosition()
         }
-    }, [trackPath, rememberPositionEnabled, rememberPosition])
+    }, [trackPath, rememberPositionEnabled, rememberPosition, forgetPosition])
 
-    /* ---------- Autoplay next on end ---------- */
+    /* ---------- Repeat / autoplay next on end ---------- */
     React.useEffect(() => {
         const v = videoRef.current
         if (!v) return
         const onEnded = () => {
-            if (autoplayNext) next()
+            const { repeat, currentIndex } = usePlaylistStore.getState()
+            if (repeat === 'one') {
+                controller.restart()
+                return
+            }
+            if (!useSettingsStore.getState().autoplayNext) return
+            const upcoming = next()
+            // A one-item queue on "repeat all" wraps onto itself: the track
+            // doesn't change, so the source isn't reloaded — replay it here.
+            if (upcoming && usePlaylistStore.getState().currentIndex === currentIndex) {
+                controller.restart()
+            }
         }
         v.addEventListener('ended', onEnded)
         return () => v.removeEventListener('ended', onEnded)
-    }, [autoplayNext, next])
+    }, [controller, next])
+
+    /* ---------- Previous: restart the current video first ---------- */
+    const goPrevious = React.useCallback(() => {
+        const v = videoRef.current
+        if (v && v.currentTime > 3) {
+            controller.seekTo(0)
+            return
+        }
+        const before = usePlaylistStore.getState().currentIndex
+        prev()
+        if (usePlaylistStore.getState().currentIndex === before) controller.seekTo(0)
+    }, [controller, prev])
 
     /* ---------- Fullscreen ---------- */
     const toggleFullscreen = React.useCallback(() => {
@@ -110,6 +148,7 @@ export function Player({ className }: PlayerProps) {
 
     React.useEffect(() => {
         const onFs = () => setFullscreen(!!document.fullscreenElement)
+        onFs()
         document.addEventListener('fullscreenchange', onFs)
         return () => document.removeEventListener('fullscreenchange', onFs)
     }, [setFullscreen])
@@ -117,17 +156,24 @@ export function Player({ className }: PlayerProps) {
     /* ---------- Keyboard ---------- */
     useKeyboardShortcuts((e) => {
         if (!track) return
+        if (e.ctrlKey || e.metaKey || e.altKey) return
         const seekStep = useSettingsStore.getState().seekStepSeconds
         const longSeek = useSettingsStore.getState().longSeekStepSeconds
+        if (e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+            e.preventDefault(); next(); return
+        }
+        if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+            e.preventDefault(); goPrevious(); return
+        }
         switch (e.key) {
             case ' ':
             case 'k':
             case 'K':
                 e.preventDefault(); controller.togglePlay(); break
             case 'ArrowLeft':
-                controller.seekBy(-seekStep); break
+                e.preventDefault(); controller.seekBy(-seekStep); break
             case 'ArrowRight':
-                controller.seekBy(seekStep); break
+                e.preventDefault(); controller.seekBy(seekStep); break
             case 'j':
             case 'J':
                 controller.seekBy(-longSeek); break
@@ -135,18 +181,19 @@ export function Player({ className }: PlayerProps) {
             case 'L':
                 controller.seekBy(longSeek); break
             case ',':
-                controller.seekBy(-1 / 30); controller.pause(); break
+                controller.pause(); controller.seekBy(-1 / 30); break
             case '.':
-                controller.seekBy(1 / 30); controller.pause(); break
+                controller.pause(); controller.seekBy(1 / 30); break
             case 'Home':
-                controller.seekTo(0); break
+                e.preventDefault(); controller.seekTo(0); break
             case 'End': {
+                e.preventDefault()
                 const v = videoRef.current; if (v) controller.seekTo(v.duration || 0); break
             }
             case 'ArrowUp':
-                controller.setVolume(usePlayerStore.getState().volume + 0.05); break
+                e.preventDefault(); controller.setVolume(usePlayerStore.getState().volume + 0.05); break
             case 'ArrowDown':
-                controller.setVolume(usePlayerStore.getState().volume - 0.05); break
+                e.preventDefault(); controller.setVolume(usePlayerStore.getState().volume - 0.05); break
             case 'm':
             case 'M':
                 controller.toggleMute(); break
@@ -157,12 +204,11 @@ export function Player({ className }: PlayerProps) {
             case 'Q':
                 togglePlaylist(); break
             case 'p':
-            case 'P':
                 controller.requestPiP(); break
             case '>':
-                controller.setRate(Math.min(2, usePlayerStore.getState().playbackRate + 0.25)); break
+                controller.setRate(usePlayerStore.getState().playbackRate + 0.25); break
             case '<':
-                controller.setRate(Math.max(0.25, usePlayerStore.getState().playbackRate - 0.25)); break
+                controller.setRate(usePlayerStore.getState().playbackRate - 0.25); break
             default: {
                 if (/^[0-9]$/.test(e.key)) {
                     const v = videoRef.current
@@ -180,25 +226,24 @@ export function Player({ className }: PlayerProps) {
                 track && !controlsVisible && 'cursor-none',
                 className,
             )}
-            onDoubleClick={toggleFullscreen}
+            onDoubleClick={track ? toggleFullscreen : undefined}
             tabIndex={-1}
         >
-            {track ? (
-                <video
-                    ref={videoRef}
-                    className="h-full w-full object-contain"
-                    playsInline
-                    preload="metadata"
-                    onClick={() => controller.togglePlay()}
-                />
-            ) : (
-                <EmptyState />
-            )}
+            {/* Always mounted so the controller's listeners stay attached across track changes. */}
+            <video
+                ref={videoRef}
+                className={cn('h-full w-full object-contain', !track && 'hidden')}
+                playsInline
+                preload="metadata"
+                onClick={() => controller.togglePlay()}
+            />
+            {!track && <EmptyState />}
 
             {track && (
                 <PlayerControls
                     controller={controller}
                     onToggleFullscreen={toggleFullscreen}
+                    onPrevious={goPrevious}
                     visible={controlsVisible}
                 />
             )}

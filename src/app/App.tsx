@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
 import { getMediaInfo, getStartupMediaFiles, pickVideoFiles, pickFolder, scanDirectory } from '@/lib/tauri'
 import { usePlaylistStore } from '@/features/playlist/store'
+import { useSettingsStore } from '@/features/settings/store'
 import { toast } from 'sonner'
 
 function GlobalShortcuts() {
@@ -18,8 +19,13 @@ function GlobalShortcuts() {
             if (e.shiftKey) {
                 const folder = await pickFolder()
                 if (folder) {
-                    const files = await scanDirectory(folder, true).catch(() => [])
-                    if (files.length) setQueue(files, 0)
+                    const files = await scanDirectory(folder, useSettingsStore.getState().scanRecursive).catch(() => [])
+                    if (files.length) {
+                        setQueue(files, 0)
+                        await router.navigate('/player')
+                    } else {
+                        toast.error('No videos found in that folder')
+                    }
                 }
             } else {
                 const paths = await pickVideoFiles(true)
@@ -27,7 +33,10 @@ function GlobalShortcuts() {
                     const files = (await Promise.all(paths.map((p) => getMediaInfo(p).catch(() => null)))).filter(
                         Boolean,
                     ) as Awaited<ReturnType<typeof getMediaInfo>>[]
-                    if (files.length) setQueue(files, 0)
+                    if (files.length) {
+                        setQueue(files, 0)
+                        await router.navigate('/player')
+                    }
                 }
             }
         }
@@ -70,25 +79,35 @@ function DropZone() {
     const setQueue = usePlaylistStore((s) => s.setQueue)
 
     React.useEffect(() => {
+        let cancelled = false
         let unlisten: UnlistenFn | undefined
             ; (async () => {
                 try {
-                    unlisten = await listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
+                    const stop = await listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
                         const paths = event.payload?.paths ?? []
                         if (!paths.length) return
+                        // Scanning handles both dropped files (filtered to videos) and folders.
+                        const recursive = useSettingsStore.getState().scanRecursive
                         const files = (
-                            await Promise.all(paths.map((p) => getMediaInfo(p).catch(() => null)))
-                        ).filter(Boolean) as Awaited<ReturnType<typeof getMediaInfo>>[]
+                            await Promise.all(paths.map((p) => scanDirectory(p, recursive).catch(() => [])))
+                        ).flat()
                         if (files.length) {
                             setQueue(files, 0)
+                            await router.navigate('/player')
                             toast.success(`Loaded ${files.length} file${files.length > 1 ? 's' : ''}`)
+                        } else {
+                            toast.error('No supported videos in the dropped items')
                         }
                     })
+                    // The component may unmount before `listen` resolves.
+                    if (cancelled) stop()
+                    else unlisten = stop
                 } catch {
                     /* not in tauri */
                 }
             })()
         return () => {
+            cancelled = true
             unlisten?.()
         }
     }, [setQueue])

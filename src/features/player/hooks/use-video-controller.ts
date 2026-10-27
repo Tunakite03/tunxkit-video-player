@@ -1,9 +1,23 @@
 import * as React from "react";
 import { usePlayerStore } from "../store";
 
+/** Fraction (0..1) of the media buffered around the current playback position. */
+function bufferedFraction(video: HTMLVideoElement): number {
+  const { buffered, duration, currentTime } = video;
+  if (!(duration > 0) || !Number.isFinite(duration) || buffered.length === 0)
+    return 0;
+  for (let i = 0; i < buffered.length; i++) {
+    if (buffered.start(i) <= currentTime && currentTime <= buffered.end(i)) {
+      return buffered.end(i) / duration;
+    }
+  }
+  return buffered.end(buffered.length - 1) / duration;
+}
+
 /**
  * Wires an HTMLVideoElement to the player store. Returns helper controls.
  * Intentionally a thin layer — the source of truth for state is the video element itself.
+ * The video element must be mounted for the whole lifetime of the component using this hook.
  */
 export function useVideoController(
   videoRef: React.RefObject<HTMLVideoElement | null>,
@@ -19,37 +33,81 @@ export function useVideoController(
   React.useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+
+    // `timeupdate` only fires ~4 times per second, so drive the progress bar
+    // from animation frames while playing to keep it in step with the picture.
+    let frame: number | null = null;
+    const stopTicking = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = null;
+    };
+    const tick = () => {
+      setCurrentTime(video.currentTime);
+      frame = window.requestAnimationFrame(tick);
+    };
+    const startTicking = () => {
+      if (frame === null) frame = window.requestAnimationFrame(tick);
+    };
+
+    const onPlaying = () => {
+      setPaused(false);
+      startTicking();
+    };
     const onPlay = () => setPaused(false);
-    const onPause = () => setPaused(true);
-    const onTime = () => setCurrentTime(video.currentTime);
+    const onPause = () => {
+      setPaused(true);
+      stopTicking();
+      setCurrentTime(video.currentTime);
+    };
+    const onWaiting = () => stopTicking();
+    const onTime = () => {
+      setCurrentTime(video.currentTime);
+      setBuffered(bufferedFraction(video));
+    };
     const onDur = () =>
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
-    const onProg = () => {
-      if (video.buffered.length > 0) {
-        const end = video.buffered.end(video.buffered.length - 1);
-        setBuffered(video.duration > 0 ? end / video.duration : 0);
-      }
+    const onProg = () => setBuffered(bufferedFraction(video));
+    const onEmptied = () => {
+      stopTicking();
+      setPaused(true);
+      setCurrentTime(0);
+      setDuration(0);
+      setBuffered(0);
     };
     const onVol = () => {
       setVolumeState(video.volume);
       setMuted(video.muted);
     };
     const onRate = () => setPlaybackRate(video.playbackRate);
-    video.addEventListener("play", onPlay);
-    video.addEventListener("pause", onPause);
-    video.addEventListener("timeupdate", onTime);
-    video.addEventListener("durationchange", onDur);
-    video.addEventListener("progress", onProg);
-    video.addEventListener("volumechange", onVol);
-    video.addEventListener("ratechange", onRate);
+
+    const events: [keyof HTMLMediaElementEventMap, () => void][] = [
+      ["play", onPlay],
+      ["playing", onPlaying],
+      ["pause", onPause],
+      ["ended", onPause],
+      ["waiting", onWaiting],
+      ["timeupdate", onTime],
+      ["seeking", onTime],
+      ["seeked", onTime],
+      ["loadedmetadata", onDur],
+      ["durationchange", onDur],
+      ["progress", onProg],
+      ["emptied", onEmptied],
+      ["volumechange", onVol],
+      ["ratechange", onRate],
+    ];
+    for (const [name, fn] of events) video.addEventListener(name, fn);
+
+    // Sync with whatever state the element is already in.
+    onDur();
+    onTime();
+    onVol();
+    if (video.paused) setPaused(true);
+    else onPlaying();
+
     return () => {
-      video.removeEventListener("play", onPlay);
-      video.removeEventListener("pause", onPause);
-      video.removeEventListener("timeupdate", onTime);
-      video.removeEventListener("durationchange", onDur);
-      video.removeEventListener("progress", onProg);
-      video.removeEventListener("volumechange", onVol);
-      video.removeEventListener("ratechange", onRate);
+      stopTicking();
+      for (const [name, fn] of events) video.removeEventListener(name, fn);
     };
   }, [
     videoRef,
@@ -62,28 +120,36 @@ export function useVideoController(
     setPlaybackRate,
   ]);
 
-  const controls = React.useMemo(
-    () => ({
+  const controls = React.useMemo(() => {
+    const seekTo = (t: number) => {
+      const v = videoRef.current;
+      if (!v || !Number.isFinite(v.duration)) return;
+      const target = Math.max(0, Math.min(v.duration, t));
+      v.currentTime = target;
+      // Reflect the new position right away so the seek bar doesn't snap back
+      // to the old time while the element is still seeking.
+      setCurrentTime(target);
+    };
+    return {
       togglePlay: () => {
         const v = videoRef.current;
-        if (!v) return;
-        if (v.paused) v.play().catch(() => {});
+        if (!v || !v.currentSrc) return;
+        if (v.paused || v.ended) v.play().catch(() => {});
         else v.pause();
       },
       play: () => videoRef.current?.play().catch(() => {}),
       pause: () => videoRef.current?.pause(),
-      seekTo: (t: number) => {
-        const v = videoRef.current;
-        if (!v) return;
-        v.currentTime = Math.max(0, Math.min(v.duration || 0, t));
-      },
+      seekTo,
       seekBy: (delta: number) => {
         const v = videoRef.current;
         if (!v) return;
-        v.currentTime = Math.max(
-          0,
-          Math.min(v.duration || 0, v.currentTime + delta),
-        );
+        seekTo(v.currentTime + delta);
+      },
+      restart: () => {
+        const v = videoRef.current;
+        if (!v || !v.currentSrc) return;
+        seekTo(0);
+        v.play().catch(() => {});
       },
       setVolume: (vol: number) => {
         const v = videoRef.current;
@@ -98,7 +164,7 @@ export function useVideoController(
       },
       setRate: (rate: number) => {
         const v = videoRef.current;
-        if (v) v.playbackRate = rate;
+        if (v) v.playbackRate = Math.max(0.25, Math.min(2, rate));
       },
       requestPiP: async () => {
         const v = videoRef.current;
@@ -112,9 +178,8 @@ export function useVideoController(
           /* unsupported */
         }
       },
-    }),
-    [videoRef],
-  );
+    };
+  }, [videoRef, setCurrentTime]);
 
   return controls;
 }

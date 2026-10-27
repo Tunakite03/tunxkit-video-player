@@ -7,6 +7,12 @@ function makeTrack(file: MediaFile): Track {
   return { id: `${file.path}`, file };
 }
 
+/** Drop repeated paths — track ids are paths and must stay unique. */
+function uniqueByPath(files: MediaFile[]): MediaFile[] {
+  const seen = new Set<string>();
+  return files.filter((f) => (seen.has(f.path) ? false : (seen.add(f.path), true)));
+}
+
 interface PlaylistState {
   tracks: Track[];
   currentIndex: number;
@@ -44,14 +50,21 @@ export const usePlaylistStore = create<PlaylistState>()(
 
       setQueue: (files, startIndex = 0) =>
         set((s) => {
-          s.tracks = files.map(makeTrack);
+          const unique = uniqueByPath(files);
+          const startPath =
+            files.length > 0 ? files[clampIndex(startIndex, files.length)].path : undefined;
+          s.tracks = unique.map(makeTrack);
           s.currentIndex =
-            files.length > 0 ? clampIndex(startIndex, files.length) : -1;
+            startPath !== undefined
+              ? unique.findIndex((f) => f.path === startPath)
+              : -1;
         }),
 
       enqueue: (files) =>
         set((s) => {
-          s.tracks.push(...files.map(makeTrack));
+          const known = new Set(s.tracks.map((t) => t.file.path));
+          const fresh = uniqueByPath(files).filter((f) => !known.has(f.path));
+          s.tracks.push(...fresh.map(makeTrack));
           if (s.currentIndex < 0 && s.tracks.length > 0) s.currentIndex = 0;
         }),
 
@@ -87,7 +100,8 @@ export const usePlaylistStore = create<PlaylistState>()(
         const { tracks, currentIndex, shuffle, repeat } = get();
         if (tracks.length === 0) return undefined;
         const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-        if (repeat === "one") return tracks[safeIndex];
+        // Called for an explicit "next": "repeat one" (handled by the player when a
+        // video ends) wraps around like "repeat all" instead of being stuck.
         let nextIdx: number;
         if (shuffle) {
           if (tracks.length === 1) nextIdx = 0;
@@ -99,7 +113,7 @@ export const usePlaylistStore = create<PlaylistState>()(
         } else {
           nextIdx = safeIndex + 1;
           if (nextIdx >= tracks.length) {
-            if (repeat === "all") nextIdx = 0;
+            if (repeat !== "off") nextIdx = 0;
             else return undefined;
           }
         }
@@ -110,9 +124,10 @@ export const usePlaylistStore = create<PlaylistState>()(
       },
 
       prev: () => {
-        const { tracks, currentIndex } = get();
+        const { tracks, currentIndex, repeat } = get();
         if (tracks.length === 0) return undefined;
-        const idx = Math.max(0, (currentIndex >= 0 ? currentIndex : 0) - 1);
+        let idx = (currentIndex >= 0 ? currentIndex : 0) - 1;
+        if (idx < 0) idx = repeat !== "off" ? tracks.length - 1 : 0;
         set((s) => {
           s.currentIndex = idx;
         });

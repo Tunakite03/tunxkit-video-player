@@ -1,4 +1,6 @@
+import * as React from 'react'
 import { Root as SwitchRoot, Thumb as SwitchThumb } from '@radix-ui/react-switch'
+import { usePlayerStore } from '@/features/player/store'
 import { useSettingsStore } from '../store'
 import { cn } from '@/lib/cn'
 
@@ -52,8 +54,55 @@ function ToggleRow({
     )
 }
 
+/**
+ * Number field that keeps a local draft while typing and only commits a valid,
+ * clamped value on blur / Enter — committing every keystroke would clamp partial
+ * input (e.g. typing "15" into a 5..300 field would turn the "1" into "5").
+ */
+function NumberRow({
+    label,
+    value,
+    min,
+    max,
+    onChange,
+}: {
+    label: string
+    value: number
+    min: number
+    max: number
+    onChange: (n: number) => void
+}) {
+    const [draft, setDraft] = React.useState<string | null>(null)
+
+    const commit = () => {
+        if (draft === null) return
+        const n = Number(draft)
+        if (draft.trim() !== '' && Number.isFinite(n)) onChange(Math.max(min, Math.min(max, n)))
+        setDraft(null)
+    }
+
+    return (
+        <Row label={label} description={`${min}–${max}`}>
+            <input
+                type="number"
+                min={min}
+                max={max}
+                value={draft ?? value}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                    if (e.key === 'Escape') setDraft(null)
+                }}
+                className="h-9 w-20 rounded-md border border-border bg-input/40 px-3 text-sm"
+            />
+        </Row>
+    )
+}
+
 export function SettingsView() {
     const s = useSettingsStore()
+    const setPlayerVolume = usePlayerStore((p) => p.setVolume)
     return (
         <div className="mx-auto w-full max-w-2xl px-6 py-8">
             <h1 className="mb-1 text-2xl font-semibold">Settings</h1>
@@ -83,29 +132,41 @@ export function SettingsView() {
                         max={1}
                         step={0.05}
                         value={s.defaultVolume}
-                        onChange={(e) => s.setVolume(Number(e.target.value))}
+                        onChange={(e) => {
+                            const v = Number(e.target.value)
+                            s.setVolume(v)
+                            // Apply it to the player too, otherwise the setting has no visible effect.
+                            setPlayerVolume(v)
+                        }}
                         className="w-40 accent-[var(--color-primary)]"
                     />
                 </Row>
-                <Row label="Seek step (s)">
-                    <input
-                        type="number"
-                        min={1}
-                        max={60}
-                        value={s.seekStepSeconds}
-                        onChange={(e) => s.set('seekStepSeconds', Number(e.target.value))}
-                        className="h-9 w-20 rounded-md border border-border bg-input/40 px-3 text-sm"
-                    />
-                </Row>
-                <Row label="Long seek step (s)">
-                    <input
-                        type="number"
-                        min={1}
-                        max={120}
-                        value={s.longSeekStepSeconds}
-                        onChange={(e) => s.set('longSeekStepSeconds', Number(e.target.value))}
-                        className="h-9 w-20 rounded-md border border-border bg-input/40 px-3 text-sm"
-                    />
+                <NumberRow
+                    label="Seek step (s)"
+                    min={1}
+                    max={60}
+                    value={s.seekStepSeconds}
+                    onChange={(n) => s.set('seekStepSeconds', n)}
+                />
+                <NumberRow
+                    label="Long seek step (s)"
+                    min={5}
+                    max={300}
+                    value={s.longSeekStepSeconds}
+                    onChange={(n) => s.set('longSeekStepSeconds', n)}
+                />
+                <Row label="Default playback speed">
+                    <select
+                        value={s.defaultPlaybackRate}
+                        onChange={(e) => s.set('defaultPlaybackRate', Number(e.target.value))}
+                        className="h-9 rounded-md border border-border bg-input/40 px-2 text-sm"
+                    >
+                        {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
+                            <option key={r} value={r}>
+                                {r}×
+                            </option>
+                        ))}
+                    </select>
                 </Row>
             </section>
 

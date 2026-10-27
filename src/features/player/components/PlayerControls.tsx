@@ -24,10 +24,11 @@ const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
 interface PlayerControlsProps {
     controller: VideoController
     onToggleFullscreen: () => void
+    onPrevious: () => void
     visible: boolean
 }
 
-export function PlayerControls({ controller, onToggleFullscreen, visible }: PlayerControlsProps) {
+export function PlayerControls({ controller, onToggleFullscreen, onPrevious, visible }: PlayerControlsProps) {
     const paused = usePlayerStore((s) => s.paused)
     const isFullscreen = usePlayerStore((s) => s.isFullscreen)
     const playbackRate = usePlayerStore((s) => s.playbackRate)
@@ -36,7 +37,6 @@ export function PlayerControls({ controller, onToggleFullscreen, visible }: Play
     const toggleShuffle = usePlaylistStore((s) => s.toggleShuffle)
     const cycleRepeat = usePlaylistStore((s) => s.cycleRepeat)
     const next = usePlaylistStore((s) => s.next)
-    const prev = usePlaylistStore((s) => s.prev)
     const togglePlaylist = useUIStore((s) => s.togglePlaylist)
 
     const RepeatIcon = repeat === 'one' ? Repeat1 : Repeat
@@ -67,9 +67,9 @@ export function PlayerControls({ controller, onToggleFullscreen, visible }: Play
                     </IconButton>
                     <IconButton
                         label="Previous"
-                        shortcut="P"
+                        shortcut="Shift+P"
                         size="icon"
-                        onClick={() => prev()}
+                        onClick={onPrevious}
                         className="h-11 w-11 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
                     >
                         <SkipBack className="h-5 w-5" />
@@ -85,7 +85,7 @@ export function PlayerControls({ controller, onToggleFullscreen, visible }: Play
                     </IconButton>
                     <IconButton
                         label="Next"
-                        shortcut="N"
+                        shortcut="Shift+N"
                         size="icon"
                         onClick={() => next()}
                         className="h-11 w-11 rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
