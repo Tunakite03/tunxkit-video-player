@@ -30,7 +30,6 @@ export interface SettingsState {
   seekStepSeconds: number;
   longSeekStepSeconds: number;
   defaultPlaybackRate: number;
-  hardwareAccel: boolean;
   scanRecursive: boolean;
   setVolume: (v: number) => void;
   set: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void;
@@ -45,7 +44,6 @@ export const useSettingsStore = create<SettingsState>()(
       seekStepSeconds: 5,
       longSeekStepSeconds: 10,
       defaultPlaybackRate: 1,
-      hardwareAccel: true,
       scanRecursive: true,
       setVolume: (v) =>
         set((s) => {
@@ -53,10 +51,7 @@ export const useSettingsStore = create<SettingsState>()(
         }),
       set: (key, value) =>
         set((s) => {
-          (s as Record<string, unknown>)[key as string] = normalizeSetting(
-            key,
-            value,
-          );
+          (s as Record<string, unknown>)[key as string] = normalizeSetting(key, value);
         }),
     })),
     {

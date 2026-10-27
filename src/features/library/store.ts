@@ -11,9 +11,11 @@ interface LibraryFolder {
 interface LibraryState {
   folders: LibraryFolder[];
   items: MediaFile[];
+  /** Folders + options that `items` was scanned with; a match means no rescan is needed. */
+  scannedKey: string | null;
   loading: boolean;
   query: string;
-  setItems: (items: MediaFile[]) => void;
+  setItems: (items: MediaFile[], scannedKey: string | null) => void;
   addFolder: (path: string) => void;
   removeFolder: (path: string) => void;
   setLoading: (loading: boolean) => void;
@@ -25,11 +27,13 @@ export const useLibraryStore = create<LibraryState>()(
     immer((set) => ({
       folders: [],
       items: [],
+      scannedKey: null,
       loading: false,
       query: "",
-      setItems: (items) =>
+      setItems: (items, scannedKey) =>
         set((s) => {
           s.items = items;
+          s.scannedKey = scannedKey;
         }),
       addFolder: (path) =>
         set((s) => {

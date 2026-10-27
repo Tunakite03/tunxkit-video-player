@@ -1,27 +1,26 @@
 import * as React from "react";
-import { getThumbnail, getCachedThumbnail } from "@/lib/thumbnails";
+import { getThumbnail, getCachedThumbnail, type Thumbnail } from "@/lib/thumbnails";
 
-export function useThumbnail(path: string | null | undefined, enabled = true) {
-  const cachedUrl = path && enabled ? (getCachedThumbnail(path) ?? null) : null;
-  const [generatedUrl, setGeneratedUrl] = React.useState<string | null>(null);
+/** Preview frame and duration for a video, generated once it is `enabled`. */
+export function useThumbnail(path: string | null | undefined, enabled = true): Thumbnail | null {
+  const cached = path && enabled ? (getCachedThumbnail(path) ?? null) : null;
+  const [generated, setGenerated] = React.useState<Thumbnail | null>(null);
 
   React.useEffect(() => {
-    if (!path || !enabled || cachedUrl) return;
+    if (!path || !enabled || cached) return;
     let cancelled = false;
-    getThumbnail(path).then((u) => {
-      if (!cancelled) setGeneratedUrl(u);
+    getThumbnail(path).then((t) => {
+      if (!cancelled) setGenerated(t);
     });
     return () => {
       cancelled = true;
     };
-  }, [path, enabled, cachedUrl]);
+  }, [path, enabled, cached]);
 
-  return cachedUrl ?? generatedUrl;
+  return cached ?? generated;
 }
 
-export function useInView<T extends Element>(
-  options?: IntersectionObserverInit,
-) {
+export function useInView<T extends Element>(options?: IntersectionObserverInit) {
   const ref = React.useRef<T | null>(null);
   const [inView, setInView] = React.useState(false);
 

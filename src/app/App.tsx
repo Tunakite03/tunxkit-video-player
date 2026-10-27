@@ -1,127 +1,104 @@
-import * as React from 'react'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { Providers } from './providers'
-import { AppRouter, router } from './router'
-import { useUIStore } from '@/stores/ui-store'
-import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
-import { getMediaInfo, getStartupMediaFiles, pickVideoFiles, pickFolder, scanDirectory } from '@/lib/tauri'
-import { usePlaylistStore } from '@/features/playlist/store'
-import { useSettingsStore } from '@/features/settings/store'
-import { toast } from 'sonner'
+import * as React from "react";
+import { listen, type EventCallback } from "@tauri-apps/api/event";
+import { Providers } from "./providers";
+import { AppRouter } from "./router";
+import { useUIStore } from "@/stores/ui-store";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { getStartupMediaFiles } from "@/lib/tauri";
+import {
+  announceLoaded,
+  openFiles,
+  openFolder,
+  playFiles,
+  scanPaths,
+} from "@/features/playlist/open-media";
+import { toast } from "sonner";
+import type { MediaFile } from "@/types/media";
+
+/** Subscribe to a Tauri event for the component's lifetime; a no-op outside Tauri. */
+function useTauriEvent<T>(event: string, handler: EventCallback<T>) {
+  const ref = React.useRef(handler);
+  React.useEffect(() => {
+    ref.current = handler;
+  }, [handler]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<T>(event, (e) => ref.current(e)).then(
+      (stop) => {
+        // The component may unmount before `listen` resolves.
+        if (cancelled) stop();
+        else unlisten = stop;
+      },
+      () => {
+        /* not in tauri */
+      },
+    );
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [event]);
+}
 
 function GlobalShortcuts() {
-    const openShortcuts = useUIStore((s) => s.openShortcuts)
-    const setQueue = usePlaylistStore((s) => s.setQueue)
+  const openShortcuts = useUIStore((s) => s.openShortcuts);
 
-    useKeyboardShortcuts(async (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
-            e.preventDefault()
-            if (e.shiftKey) {
-                const folder = await pickFolder()
-                if (folder) {
-                    const files = await scanDirectory(folder, useSettingsStore.getState().scanRecursive).catch(() => [])
-                    if (files.length) {
-                        setQueue(files, 0)
-                        await router.navigate('/player')
-                    } else {
-                        toast.error('No videos found in that folder')
-                    }
-                }
-            } else {
-                const paths = await pickVideoFiles(true)
-                if (paths.length) {
-                    const files = (await Promise.all(paths.map((p) => getMediaInfo(p).catch(() => null)))).filter(
-                        Boolean,
-                    ) as Awaited<ReturnType<typeof getMediaInfo>>[]
-                    if (files.length) {
-                        setQueue(files, 0)
-                        await router.navigate('/player')
-                    }
-                }
-            }
-        }
-        if (e.key === '?' || (e.shiftKey && e.key === '/')) {
-            e.preventDefault()
-            openShortcuts()
-        }
-    })
-    return null
+  useKeyboardShortcuts((e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+      e.preventDefault();
+      void (e.shiftKey ? openFolder() : openFiles());
+    }
+    if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+      e.preventDefault();
+      openShortcuts();
+    }
+  });
+  return null;
 }
 
 function StartupMediaLoader() {
-    const setQueue = usePlaylistStore((s) => s.setQueue)
+  React.useEffect(() => {
+    let cancelled = false;
+    getStartupMediaFiles().then(
+      async (files) => {
+        if (!cancelled && (await playFiles(files))) announceLoaded(files.length);
+      },
+      () => {
+        /* not in tauri */
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    React.useEffect(() => {
-        let cancelled = false
+  // Files opened from the OS while the app is already running.
+  useTauriEvent<MediaFile[]>("open-files", (event) => void playFiles(event.payload ?? []));
 
-            ; (async () => {
-                try {
-                    const files = await getStartupMediaFiles()
-                    if (cancelled || files.length === 0) return
-
-                    setQueue(files, 0)
-                    await router.navigate('/player')
-                    toast.success(`Loaded ${files.length} file${files.length > 1 ? 's' : ''}`)
-                } catch {
-                    /* not in tauri or no startup files */
-                }
-            })()
-
-        return () => {
-            cancelled = true
-        }
-    }, [setQueue])
-
-    return null
+  return null;
 }
 
 function DropZone() {
-    const setQueue = usePlaylistStore((s) => s.setQueue)
-
-    React.useEffect(() => {
-        let cancelled = false
-        let unlisten: UnlistenFn | undefined
-            ; (async () => {
-                try {
-                    const stop = await listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
-                        const paths = event.payload?.paths ?? []
-                        if (!paths.length) return
-                        // Scanning handles both dropped files (filtered to videos) and folders.
-                        const recursive = useSettingsStore.getState().scanRecursive
-                        const files = (
-                            await Promise.all(paths.map((p) => scanDirectory(p, recursive).catch(() => [])))
-                        ).flat()
-                        if (files.length) {
-                            setQueue(files, 0)
-                            await router.navigate('/player')
-                            toast.success(`Loaded ${files.length} file${files.length > 1 ? 's' : ''}`)
-                        } else {
-                            toast.error('No supported videos in the dropped items')
-                        }
-                    })
-                    // The component may unmount before `listen` resolves.
-                    if (cancelled) stop()
-                    else unlisten = stop
-                } catch {
-                    /* not in tauri */
-                }
-            })()
-        return () => {
-            cancelled = true
-            unlisten?.()
-        }
-    }, [setQueue])
-
-    return null
+  useTauriEvent<{ paths: string[] }>("tauri://drag-drop", async (event) => {
+    const paths = event.payload?.paths ?? [];
+    if (!paths.length) return;
+    // Scanning handles both dropped files (filtered to videos) and folders.
+    const files = await scanPaths(paths);
+    if (await playFiles(files)) announceLoaded(files.length);
+    else toast.error("No supported videos in the dropped items");
+  });
+  return null;
 }
 
 export function App() {
-    return (
-        <Providers>
-            <GlobalShortcuts />
-            <StartupMediaLoader />
-            <DropZone />
-            <AppRouter />
-        </Providers>
-    )
+  return (
+    <Providers>
+      <GlobalShortcuts />
+      <StartupMediaLoader />
+      <DropZone />
+      <AppRouter />
+    </Providers>
+  );
 }

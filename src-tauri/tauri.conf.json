@@ -32,9 +32,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": [
-            "**"
-          ],
+          "allow": [],
           "deny": []
         }
       }
@@ -55,6 +53,21 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "mp4",
+          "m4v",
+          "mov",
+          "webm",
+          "mkv",
+          "ogv"
+        ],
+        "name": "Video",
+        "description": "Video file",
+        "role": "Viewer"
+      }
     ],
     "windows": {
       "wix": {

@@ -22,12 +22,7 @@ export function useIdle(
     reset();
     // Pointer events inside the wrapper bubble to it, including in fullscreen
     // (the fullscreen element is the wrapper itself).
-    const pointerEvents = [
-      "pointermove",
-      "pointerdown",
-      "touchstart",
-      "wheel",
-    ] as const;
+    const pointerEvents = ["pointermove", "pointerdown", "touchstart", "wheel"] as const;
     for (const name of pointerEvents) node.addEventListener(name, reset);
     window.addEventListener("keydown", reset);
     document.addEventListener("fullscreenchange", reset);

@@ -7,6 +7,8 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("invalid path: {0}")]
     InvalidPath(String),
+    #[error(transparent)]
+    Tauri(#[from] tauri::Error),
 }
 
 impl Serialize for AppError {

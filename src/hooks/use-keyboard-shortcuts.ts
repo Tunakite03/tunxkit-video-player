@@ -23,12 +23,7 @@ export function useKeyboardShortcuts(handler: Handler, enabled = true) {
       const target = e.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
-        if (
-          tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          tag === "SELECT" ||
-          target.isContentEditable
-        )
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable)
           return;
         // Don't drive the player from behind an open modal dialog.
         if (target.closest?.('[role="dialog"], [role="alertdialog"]')) return;

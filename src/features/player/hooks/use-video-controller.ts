@@ -1,11 +1,12 @@
 import * as React from "react";
 import { usePlayerStore } from "../store";
 
+const DEFAULT_FRAME_SECONDS = 1 / 30;
+
 /** Fraction (0..1) of the media buffered around the current playback position. */
 function bufferedFraction(video: HTMLVideoElement): number {
   const { buffered, duration, currentTime } = video;
-  if (!(duration > 0) || !Number.isFinite(duration) || buffered.length === 0)
-    return 0;
+  if (!(duration > 0) || !Number.isFinite(duration) || buffered.length === 0) return 0;
   for (let i = 0; i < buffered.length; i++) {
     if (buffered.start(i) <= currentTime && currentTime <= buffered.end(i)) {
       return buffered.end(i) / duration;
@@ -19,9 +20,7 @@ function bufferedFraction(video: HTMLVideoElement): number {
  * Intentionally a thin layer — the source of truth for state is the video element itself.
  * The video element must be mounted for the whole lifetime of the component using this hook.
  */
-export function useVideoController(
-  videoRef: React.RefObject<HTMLVideoElement | null>,
-) {
+export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | null>) {
   const setPaused = usePlayerStore((s) => s.setPaused);
   const setDuration = usePlayerStore((s) => s.setDuration);
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime);
@@ -29,6 +28,8 @@ export function useVideoController(
   const setVolumeState = usePlayerStore((s) => s.setVolume);
   const setMuted = usePlayerStore((s) => s.setMuted);
   const setPlaybackRate = usePlayerStore((s) => s.setPlaybackRate);
+  /** Shortest gap between presented frames seen for the current source, in seconds. */
+  const learnedFrameRef = React.useRef(Infinity);
 
   React.useEffect(() => {
     const video = videoRef.current;
@@ -64,8 +65,7 @@ export function useVideoController(
       setCurrentTime(video.currentTime);
       setBuffered(bufferedFraction(video));
     };
-    const onDur = () =>
-      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+    const onDur = () => setDuration(Number.isFinite(video.duration) ? video.duration : 0);
     const onProg = () => setBuffered(bufferedFraction(video));
     const onEmptied = () => {
       stopTicking();
@@ -80,6 +80,31 @@ export function useVideoController(
     };
     const onRate = () => setPlaybackRate(video.playbackRate);
 
+    // Learn the frame duration from presented frames so frame stepping matches the
+    // video's real fps. The smallest gap wins: above 1× speed frames get skipped.
+    let frameCallback: number | null = null;
+    let lastMediaTime: number | null = null;
+    const onFrame: VideoFrameRequestCallback = (_now, meta) => {
+      if (lastMediaTime !== null) {
+        const gap = meta.mediaTime - lastMediaTime;
+        if (gap > 0.004 && gap < 0.5 && gap < learnedFrameRef.current)
+          learnedFrameRef.current = gap;
+      }
+      lastMediaTime = meta.mediaTime;
+      frameCallback = video.requestVideoFrameCallback(onFrame);
+    };
+    const supportsFrameCallback = "requestVideoFrameCallback" in video;
+    if (supportsFrameCallback) frameCallback = video.requestVideoFrameCallback(onFrame);
+    const onSourceChange = () => {
+      learnedFrameRef.current = Infinity;
+      lastMediaTime = null;
+    };
+    // Seeking jumps mediaTime, so don't measure a gap across it.
+    const onSeeking = () => {
+      lastMediaTime = null;
+      onTime();
+    };
+
     const events: [keyof HTMLMediaElementEventMap, () => void][] = [
       ["play", onPlay],
       ["playing", onPlaying],
@@ -87,7 +112,8 @@ export function useVideoController(
       ["ended", onPause],
       ["waiting", onWaiting],
       ["timeupdate", onTime],
-      ["seeking", onTime],
+      ["seeking", onSeeking],
+      ["loadstart", onSourceChange],
       ["seeked", onTime],
       ["loadedmetadata", onDur],
       ["durationchange", onDur],
@@ -98,15 +124,20 @@ export function useVideoController(
     ];
     for (const [name, fn] of events) video.addEventListener(name, fn);
 
-    // Sync with whatever state the element is already in.
+    // Sync with whatever state the element is already in. Volume goes the other
+    // way: a fresh element reports 1, which would overwrite the stored volume.
     onDur();
     onTime();
-    onVol();
+    const { volume, muted } = usePlayerStore.getState();
+    video.volume = volume;
+    video.muted = muted;
     if (video.paused) setPaused(true);
     else onPlaying();
 
     return () => {
       stopTicking();
+      if (supportsFrameCallback && frameCallback !== null)
+        video.cancelVideoFrameCallback(frameCallback);
       for (const [name, fn] of events) video.removeEventListener(name, fn);
     };
   }, [
@@ -145,6 +176,16 @@ export function useVideoController(
         if (!v) return;
         seekTo(v.currentTime + delta);
       },
+      /** Pause and move one frame; falls back to 30 fps until a frame rate is learned. */
+      stepFrame: (direction: 1 | -1) => {
+        const v = videoRef.current;
+        if (!v) return;
+        v.pause();
+        const frame = Number.isFinite(learnedFrameRef.current)
+          ? learnedFrameRef.current
+          : DEFAULT_FRAME_SECONDS;
+        seekTo(v.currentTime + direction * frame);
+      },
       restart: () => {
         const v = videoRef.current;
         if (!v || !v.currentSrc) return;
@@ -170,8 +211,7 @@ export function useVideoController(
         const v = videoRef.current;
         if (!v) return;
         try {
-          if (document.pictureInPictureElement)
-            await document.exitPictureInPicture();
+          if (document.pictureInPictureElement) await document.exitPictureInPicture();
           else if ("requestPictureInPicture" in v)
             await (v as HTMLVideoElement).requestPictureInPicture();
         } catch {
