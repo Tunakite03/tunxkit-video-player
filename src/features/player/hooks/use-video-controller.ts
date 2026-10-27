@@ -2,6 +2,11 @@ import * as React from "react";
 import { usePlayerStore } from "../store";
 
 const DEFAULT_FRAME_SECONDS = 1 / 30;
+/**
+ * Shortest gap between frame-driven progress updates (~30 per second). Without it a
+ * 120 Hz display re-renders the seek bar 120 times a second while a video plays.
+ */
+const LIVE_PROGRESS_INTERVAL_MS = 30;
 
 /** Fraction (0..1) of the media buffered around the current playback position. */
 function bufferedFraction(video: HTMLVideoElement): number {
@@ -19,8 +24,13 @@ function bufferedFraction(video: HTMLVideoElement): number {
  * Wires an HTMLVideoElement to the player store. Returns helper controls.
  * Intentionally a thin layer — the source of truth for state is the video element itself.
  * The video element must be mounted for the whole lifetime of the component using this hook.
+ * `liveProgress`: whether the progress bar is on screen and should follow every frame;
+ * otherwise `timeupdate` alone keeps the stored time current.
  */
-export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | null>) {
+export function useVideoController(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  liveProgress: boolean,
+) {
   const setPaused = usePlayerStore((s) => s.setPaused);
   const setDuration = usePlayerStore((s) => s.setDuration);
   const setCurrentTime = usePlayerStore((s) => s.setCurrentTime);
@@ -35,32 +45,11 @@ export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | 
     const video = videoRef.current;
     if (!video) return;
 
-    // `timeupdate` only fires ~4 times per second, so drive the progress bar
-    // from animation frames while playing to keep it in step with the picture.
-    let frame: number | null = null;
-    const stopTicking = () => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      frame = null;
-    };
-    const tick = () => {
-      setCurrentTime(video.currentTime);
-      frame = window.requestAnimationFrame(tick);
-    };
-    const startTicking = () => {
-      if (frame === null) frame = window.requestAnimationFrame(tick);
-    };
-
-    const onPlaying = () => {
-      setPaused(false);
-      startTicking();
-    };
     const onPlay = () => setPaused(false);
     const onPause = () => {
       setPaused(true);
-      stopTicking();
       setCurrentTime(video.currentTime);
     };
-    const onWaiting = () => stopTicking();
     const onTime = () => {
       setCurrentTime(video.currentTime);
       setBuffered(bufferedFraction(video));
@@ -68,7 +57,6 @@ export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | 
     const onDur = () => setDuration(Number.isFinite(video.duration) ? video.duration : 0);
     const onProg = () => setBuffered(bufferedFraction(video));
     const onEmptied = () => {
-      stopTicking();
       setPaused(true);
       setCurrentTime(0);
       setDuration(0);
@@ -107,10 +95,9 @@ export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | 
 
     const events: [keyof HTMLMediaElementEventMap, () => void][] = [
       ["play", onPlay],
-      ["playing", onPlaying],
+      ["playing", onPlay],
       ["pause", onPause],
       ["ended", onPause],
-      ["waiting", onWaiting],
       ["timeupdate", onTime],
       ["seeking", onSeeking],
       ["loadstart", onSourceChange],
@@ -131,11 +118,9 @@ export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | 
     const { volume, muted } = usePlayerStore.getState();
     video.volume = volume;
     video.muted = muted;
-    if (video.paused) setPaused(true);
-    else onPlaying();
+    setPaused(video.paused);
 
     return () => {
-      stopTicking();
       if (supportsFrameCallback && frameCallback !== null)
         video.cancelVideoFrameCallback(frameCallback);
       for (const [name, fn] of events) video.removeEventListener(name, fn);
@@ -150,6 +135,42 @@ export function useVideoController(videoRef: React.RefObject<HTMLVideoElement | 
     setMuted,
     setPlaybackRate,
   ]);
+
+  // `timeupdate` only fires ~4 times per second, so while the progress bar is on
+  // screen drive it from animation frames to keep it in step with the picture.
+  React.useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !liveProgress) return;
+    let frame: number | null = null;
+    let lastUpdate = -Infinity;
+    const tick = (now: number) => {
+      if (now - lastUpdate >= LIVE_PROGRESS_INTERVAL_MS) {
+        lastUpdate = now;
+        setCurrentTime(video.currentTime);
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    const start = () => {
+      if (frame === null) frame = window.requestAnimationFrame(tick);
+    };
+    const stop = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = null;
+    };
+    const events: [keyof HTMLMediaElementEventMap, () => void][] = [
+      ["playing", start],
+      ["pause", stop],
+      ["ended", stop],
+      ["waiting", stop],
+      ["emptied", stop],
+    ];
+    for (const [name, fn] of events) video.addEventListener(name, fn);
+    if (!video.paused) start();
+    return () => {
+      stop();
+      for (const [name, fn] of events) video.removeEventListener(name, fn);
+    };
+  }, [videoRef, liveProgress, setCurrentTime]);
 
   const controls = React.useMemo(() => {
     const seekTo = (t: number) => {

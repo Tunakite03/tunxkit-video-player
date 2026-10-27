@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "@/lib/cn";
+import { useFullscreenElement } from "@/hooks/use-fullscreen-element";
 
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
@@ -13,7 +14,7 @@ export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
 >(({ className, sideOffset = 6, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
+  <DropdownMenuPrimitive.Portal container={useFullscreenElement()}>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
