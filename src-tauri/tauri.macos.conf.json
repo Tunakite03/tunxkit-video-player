@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["mp4", "m4v", "mov", "webm"],
+        "name": "Video",
+        "description": "Video file",
+        "role": "Viewer"
+      }
+    ]
+  }
+}

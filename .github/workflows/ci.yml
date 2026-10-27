@@ -27,7 +27,12 @@ jobs:
       - run: npm run build
 
   rust:
-    runs-on: ubuntu-latest
+    # macOS too: it has its own code path for files opened from Finder and its own config.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
       run:
@@ -36,6 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       # Only what compiling and testing needs; bundling an AppImage would also need patchelf.
       - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev
@@ -48,5 +54,6 @@ jobs:
       # tauri::generate_context! expects the frontend dist folder to exist.
       - run: mkdir -p ../dist
       - run: cargo fmt --check
+        if: runner.os == 'Linux'
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test

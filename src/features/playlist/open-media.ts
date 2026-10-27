@@ -4,7 +4,14 @@
  */
 import { toast } from "sonner";
 import { router } from "@/app/router";
-import { getMediaInfo, pickFolder, pickVideoFiles, scanDirectory } from "@/lib/tauri";
+import {
+  getMediaInfo,
+  onOpenFiles,
+  pickFolder,
+  pickVideoFiles,
+  scanDirectory,
+  takePendingMediaFiles,
+} from "@/lib/tauri";
 import { useSettingsStore } from "@/features/settings/store";
 import type { MediaFile } from "@/types/media";
 import { usePlaylistStore } from "./store";
@@ -23,11 +30,19 @@ export async function mediaInfoFor(paths: string[]): Promise<MediaFile[]> {
   return files.filter((f): f is MediaFile => f !== null);
 }
 
+/** Toast for a scan that hit the backend's file cap. */
+export function warnTruncatedScan() {
+  toast.warning("Some folders have too many videos, so only part of them was loaded");
+}
+
 /** Video files in each path: folders are scanned (per settings), files are filtered to videos. */
 export async function scanPaths(paths: string[]): Promise<MediaFile[]> {
   const recursive = useSettingsStore.getState().scanRecursive;
-  const results = await Promise.all(paths.map((p) => scanDirectory(p, recursive).catch(() => [])));
-  return results.flat();
+  const results = await Promise.all(
+    paths.map((p) => scanDirectory(p, recursive).catch(() => ({ files: [], truncated: false }))),
+  );
+  if (results.some((r) => r.truncated)) warnTruncatedScan();
+  return results.flatMap((r) => r.files);
 }
 
 /** Pick video files with the system dialog and play them. */
@@ -58,4 +73,32 @@ export async function playRecent(file: MediaFile): Promise<void> {
 /** Toast for files that arrived from outside the app (startup args, drag & drop). */
 export function announceLoaded(count: number) {
   toast.success(`Loaded ${count} file${count > 1 ? "s" : ""}`);
+}
+
+async function playOpened(files: MediaFile[]) {
+  if (await playFiles(files)) announceLoaded(files.length);
+}
+
+/**
+ * Play files the OS asks us to open: those that arrived before the app was ready,
+ * then any that follow. Subscribes before collecting the early ones so none fall
+ * in between. Returns a function that stops listening; a no-op outside Tauri.
+ */
+export function receiveOpenedFiles(): () => void {
+  let stopped = false;
+  let unlisten: (() => void) | undefined;
+  onOpenFiles((files) => void playOpened(files))
+    .then(async (stop) => {
+      if (stopped) return stop();
+      unlisten = stop;
+      const pending = await takePendingMediaFiles();
+      if (!stopped) await playOpened(pending);
+    })
+    .catch(() => {
+      /* not in tauri */
+    });
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
 }

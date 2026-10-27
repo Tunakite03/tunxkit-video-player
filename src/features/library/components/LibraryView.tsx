@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { pickFolder, scanDirectory } from "@/lib/tauri";
 import { useLibraryStore } from "../store";
 import { useSettingsStore } from "@/features/settings/store";
-import { openFiles, playFiles } from "@/features/playlist/open-media";
+import { openFiles, playFiles, warnTruncatedScan } from "@/features/playlist/open-media";
 import { LibraryCard } from "./LibraryCard";
 
 export function LibraryView() {
@@ -41,9 +41,11 @@ export function LibraryView() {
       if (failed.length > 0) {
         console.warn(`Failed to scan ${failed.length} library folder(s).`, failed);
       }
-      const merged = results.flatMap((result) =>
-        result.status === "fulfilled" ? result.value : [],
+      const scanned = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
       );
+      if (scanned.some((r) => r.truncated)) warnTruncatedScan();
+      const merged = scanned.flatMap((r) => r.files);
       const seen = new Set<string>();
       const unique = merged.filter((m) => (seen.has(m.path) ? false : seen.add(m.path)));
       setItems(unique, scanKey);

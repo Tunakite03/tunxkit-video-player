@@ -4,12 +4,12 @@ import path from "node:path";
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   test: {
     // Stores persist through localStorage, which happy-dom provides.
     environment: "happy-dom",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
   },
 });

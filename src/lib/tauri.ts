@@ -2,13 +2,21 @@
  * Safe wrappers around Tauri APIs. Centralizes invoke calls so feature code stays clean.
  */
 import { invoke, convertFileSrc as tauriConvertFileSrc } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { MediaFile } from "@/types/media";
-import videoExtensions from "../../src-tauri/video-extensions.json";
+import type { MediaFile, ScanResult } from "@/types/media";
 
-/** Containers the system webview can play; the backend reads the same file. */
-export const VIDEO_EXTENSIONS: string[] = videoExtensions;
+let videoExtensions: Promise<string[]> | undefined;
+
+/** Containers the system webview can play on this platform, as the backend decides. */
+export function getVideoExtensions(): Promise<string[]> {
+  videoExtensions ??= invoke<string[]>("get_video_extensions").catch((err: unknown) => {
+    videoExtensions = undefined;
+    throw err;
+  });
+  return videoExtensions;
+}
 
 // Prevent concurrent native dialog calls (can cause two dialogs to appear simultaneously)
 let _dialogOpen = false;
@@ -21,7 +29,7 @@ export async function pickVideoFiles(multiple = true): Promise<string[]> {
     const result = await open({
       multiple,
       directory: false,
-      filters: [{ name: "Videos", extensions: VIDEO_EXTENSIONS }],
+      filters: [{ name: "Videos", extensions: await getVideoExtensions() }],
     });
     if (!result) return [];
     return Array.isArray(result) ? result : [result];
@@ -43,9 +51,9 @@ export async function pickFolder(): Promise<string | null> {
   }
 }
 
-/** Recursively scan a directory for supported video files. */
-export function scanDirectory(path: string, recursive = true): Promise<MediaFile[]> {
-  return invoke<MediaFile[]>("scan_directory", { path, recursive });
+/** Scan a directory for supported video files; the backend caps how many it returns. */
+export function scanDirectory(path: string, recursive = true): Promise<ScanResult> {
+  return invoke<ScanResult>("scan_directory", { path, recursive });
 }
 
 /** Fetch lightweight metadata for a single file. */
@@ -53,9 +61,18 @@ export function getMediaInfo(path: string): Promise<MediaFile> {
   return invoke<MediaFile>("get_media_info", { path });
 }
 
-/** Fetch media files passed by the OS when launching via Open With. */
-export function getStartupMediaFiles(): Promise<MediaFile[]> {
-  return invoke<MediaFile[]>("get_startup_media_files");
+/**
+ * Media files the OS asked us to open (launch arguments, Open With) before the
+ * frontend was listening. Call after `onOpenFiles` has subscribed: from then on
+ * the backend sends new files as events instead of holding them.
+ */
+export function takePendingMediaFiles(): Promise<MediaFile[]> {
+  return invoke<MediaFile[]>("take_pending_media_files");
+}
+
+/** Subscribe to media files the OS asks us to open while the app is running. */
+export function onOpenFiles(handler: (files: MediaFile[]) => void): Promise<UnlistenFn> {
+  return listen<MediaFile[]>("open-files", (event) => handler(event.payload ?? []));
 }
 
 /** Reveal a path in the OS file explorer. */

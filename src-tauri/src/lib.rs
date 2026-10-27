@@ -1,19 +1,19 @@
 mod commands;
 mod error;
 
+use commands::media::{self, OpenQueue};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().manage(OpenQueue::default());
 
     // Must be registered first. Opening a file while the app is running hands the
     // path to the existing window instead of starting a second player.
     #[cfg(desktop)]
     {
-        use tauri::Emitter;
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            let files = commands::media::media_files_from_args(
+            let files = media::media_files_from_args(
                 argv.into_iter().skip(1).map(Into::into),
                 std::path::Path::new(&cwd),
             );
@@ -21,10 +21,7 @@ pub fn run() {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
-            if !files.is_empty() {
-                commands::media::allow_media(app, &files);
-                let _ = app.emit("open-files", files);
-            }
+            media::open_media(app, files);
         }));
     }
 
@@ -43,16 +40,31 @@ pub fn run() {
 
     builder
         .invoke_handler(tauri::generate_handler![
-            commands::media::scan_directory,
-            commands::media::get_media_info,
-            commands::media::get_startup_media_files,
+            media::scan_directory,
+            media::get_media_info,
+            media::take_pending_media_files,
+            media::get_video_extensions,
         ])
         .setup(|app| {
+            // Files passed on the command line wait in the queue until the frontend asks.
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let files = media::media_files_from_args(std::env::args_os().skip(1), &cwd);
+            media::open_media(app.handle(), files);
+
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // Only used on macOS, where Finder hands opened files over as an event
+        // rather than as launch arguments.
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                let paths = urls.into_iter().filter_map(|url| url.to_file_path().ok());
+                media::open_media(_app, media::media_files_at(paths));
+            }
+        });
 }

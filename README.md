@@ -1,73 +1,86 @@
-# React + TypeScript + Vite
+# Tunxkit Player
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A fast, modern desktop video player built with [Tauri 2](https://v2.tauri.app), React 19 and TypeScript. Videos play in the system webview: WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Play local files from the file picker, drag & drop, "Open with" or the command line. If the app is already running, a second launch hands its files to the open window.
+- A queue with shuffle (each track plays once per cycle), repeat all/one, and history-aware "previous".
+- A library built from folders you add, with lazily generated thumbnails and search.
+- Resume from the last position, plus a list of recently played files.
+- Fullscreen, picture-in-picture, frame stepping, playback speed from 0.25× to 2×, and a full set of keyboard shortcuts (press `?` in the app to see them).
+- Light and dark themes.
 
-## React Compiler
+## Supported formats
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Container                   | Windows | Linux | macOS |
+| --------------------------- | :-----: | :---: | :---: |
+| `mp4`, `m4v`, `mov`, `webm` |    ✓    |   ✓   |   ✓   |
+| `mkv`, `ogv`                |    ✓    |   ✓   |   –   |
 
-## Expanding the ESLint configuration
+The list lives in [`src-tauri/video-extensions.json`](src-tauri/video-extensions.json). Whether a particular file plays still depends on the codecs the platform's webview supports. On Linux that means the GStreamer plugins you have installed.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+A single folder scan returns at most 10,000 videos. If it stops there, the app shows a warning.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Keyboard shortcuts
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+| Keys                  | Action                               |
+| --------------------- | ------------------------------------ |
+| `Space` / `K`         | Play / pause                         |
+| `←` / `→`             | Seek by the seek step (default 5 s)  |
+| `J` / `L`             | Seek by the long step (default 10 s) |
+| `,` / `.`             | Step one frame back / forward        |
+| `0`–`9`               | Jump to 0–90%                        |
+| `Home` / `End`        | Jump to start / end                  |
+| `↑` / `↓`             | Volume up / down                     |
+| `M`                   | Mute                                 |
+| `<` / `>`             | Slower / faster                      |
+| `Shift+N` / `Shift+P` | Next / previous in the queue         |
+| `F`                   | Fullscreen                           |
+| `P`                   | Picture-in-picture                   |
+| `Q`                   | Toggle the playlist                  |
+| `Ctrl+O`              | Open files                           |
+| `Ctrl+Shift+O`        | Open a folder                        |
+| `?`                   | Show all shortcuts                   |
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Development
+
+You need Node.js 24, a stable Rust toolchain and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
+
+```bash
+npm install
+npm run tauri dev      # run the app with hot reload
+npm run tauri build    # build installers into src-tauri/target/release/bundle
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Checks (these are what CI runs):
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run format:check && npm run lint && npm test && npm run build
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+### Project layout
+
+```
+src/
+  app/          App root, providers, router, OS file events, drag & drop
+  features/     player, playlist, library and settings (components + zustand stores)
+  components/   layout, dialogs and shared UI primitives (Radix + Tailwind)
+  hooks/, lib/  shared hooks, Tauri wrappers, thumbnails, formatting
+src-tauri/
+  src/commands/media.rs   scanning, file metadata, asset access, opened-file queue
+  tauri.conf.json         app config; tauri.macos.conf.json overrides it on macOS
+```
+
+### Security model
+
+The asset protocol starts with an empty scope. The backend grants access only to the files it returns from a media command, so the webview can't stream anything else. The production CSP allows no network connections beyond Tauri IPC.
+
+### Releasing
+
+The version comes from `package.json`, which `tauri.conf.json` reads. `src-tauri/Cargo.toml` has its own copy, and a test fails if the two differ, so bump both together.
+
+## License
+
+[MIT](LICENSE)

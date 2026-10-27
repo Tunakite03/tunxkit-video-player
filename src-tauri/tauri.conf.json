@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Tunxkit Player",
-  "version": "0.2.0",
+  "version": "../package.json",
   "identifier": "com.tunxkit.videoplayer",
   "build": {
     "frontendDist": "../dist",
@@ -28,7 +28,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:",
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:",
       "assetProtocol": {
         "enable": true,
         "scope": {
@@ -44,7 +45,7 @@
     "category": "Video",
     "copyright": "© 2026 Tunxkit",
     "publisher": "Tunxkit",
-    "homepage": "https://tunxkit.local",
+    "homepage": "https://github.com/Tunakite03/tunxkit-video-player",
     "shortDescription": "A modern, fast, beautiful desktop video player.",
     "longDescription": "Tunxkit Player — a modern, fast and beautiful cross-platform desktop video player built with Tauri. Supports playlists, library, keyboard shortcuts, picture-in-picture, fullscreen, resume from last position, and more.",
     "icon": [

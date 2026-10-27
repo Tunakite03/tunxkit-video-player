@@ -4,16 +4,15 @@ import { Providers } from "./providers";
 import { AppRouter } from "./router";
 import { useUIStore } from "@/stores/ui-store";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { getStartupMediaFiles } from "@/lib/tauri";
 import {
   announceLoaded,
   openFiles,
   openFolder,
   playFiles,
+  receiveOpenedFiles,
   scanPaths,
 } from "@/features/playlist/open-media";
 import { toast } from "sonner";
-import type { MediaFile } from "@/types/media";
 
 /** Subscribe to a Tauri event for the component's lifetime; a no-op outside Tauri. */
 function useTauriEvent<T>(event: string, handler: EventCallback<T>) {
@@ -58,25 +57,9 @@ function GlobalShortcuts() {
   return null;
 }
 
-function StartupMediaLoader() {
-  React.useEffect(() => {
-    let cancelled = false;
-    getStartupMediaFiles().then(
-      async (files) => {
-        if (!cancelled && (await playFiles(files))) announceLoaded(files.length);
-      },
-      () => {
-        /* not in tauri */
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Files opened from the OS while the app is already running.
-  useTauriEvent<MediaFile[]>("open-files", (event) => void playFiles(event.payload ?? []));
-
+/** Files opened from the OS: at launch, and while the app is already running. */
+function OpenedMediaLoader() {
+  React.useEffect(() => receiveOpenedFiles(), []);
   return null;
 }
 
@@ -96,7 +79,7 @@ export function App() {
   return (
     <Providers>
       <GlobalShortcuts />
-      <StartupMediaLoader />
+      <OpenedMediaLoader />
       <DropZone />
       <AppRouter />
     </Providers>

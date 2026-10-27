@@ -15,6 +15,12 @@ export interface MediaFile {
   modified?: number;
 }
 
+export interface ScanResult {
+  files: MediaFile[];
+  /** The backend stopped at its file cap, so some videos were left out. */
+  truncated: boolean;
+}
+
 export interface Track {
   id: string;
   file: MediaFile;
