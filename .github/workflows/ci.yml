@@ -12,6 +12,7 @@ concurrency:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,15 +28,17 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
+      # Only what compiling and testing needs; bundling an AppImage would also need patchelf.
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
