@@ -69,13 +69,14 @@ src/
   components/   layout, dialogs and shared UI primitives (Radix + Tailwind)
   hooks/, lib/  shared hooks, Tauri wrappers, thumbnails, formatting
 src-tauri/
-  src/commands/media.rs   scanning, file metadata, asset access, opened-file queue
+  src/commands/media.rs   scanning, file metadata, media access, opened-file queue
+  src/media_protocol.rs   media:// byte-range streaming of granted videos
   tauri.conf.json         app config; tauri.macos.conf.json overrides it on macOS
 ```
 
 ### Security model
 
-The asset protocol starts with an empty scope. The backend grants access only to the files it returns from a media command, so the webview can't stream anything else. The production CSP allows no network connections beyond Tauri IPC.
+Videos stream through the app's own `media://` protocol, which starts with nothing granted. The backend grants access only to the files it returns from a media command, so the webview can't stream anything else. The production CSP allows no network connections beyond Tauri IPC.
 
 ### Releasing
 

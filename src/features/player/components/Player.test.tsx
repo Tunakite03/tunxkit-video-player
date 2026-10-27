@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePlaylistStore } from "@/features/playlist/store";
 import { useSettingsStore } from "@/features/settings/store";
+import { PlayerPage } from "@/pages/PlayerPage";
+import { useUIStore } from "@/stores/ui-store";
 import type { MediaFile } from "@/types/media";
 import { usePlayerStore, useResumeStore } from "../store";
-import { Player } from "./Player";
 
 const getMediaInfo = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/tauri", () => ({
   getMediaInfo,
+  showInFolder: vi.fn(),
   toMediaSrc: (path: string) => `asset://${path}`,
 }));
 
@@ -33,7 +35,7 @@ let play: ReturnType<typeof vi.fn<() => Promise<void>>>;
 function renderPlayer(): TestVideo {
   const { container } = render(
     <TooltipProvider>
-      <Player />
+      <PlayerPage />
     </TooltipProvider>,
   );
   const video = container.querySelector("video") as TestVideo;
@@ -66,6 +68,7 @@ beforeEach(() => {
   useSettingsStore.setState(useSettingsStore.getInitialState(), true);
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useResumeStore.setState(useResumeStore.getInitialState(), true);
+  useUIStore.setState({ playlistOpen: false });
   play = vi.fn(() => Promise.resolve());
   vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(play);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -147,6 +150,25 @@ describe("Player", () => {
     video.currentTime = 50;
     act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
     expect(video.currentTime).toBe(57);
+  });
+
+  it("goes fullscreen with the whole page, so the open playlist stays visible", () => {
+    // happy-dom has no Fullscreen API; record which element asked for it.
+    const requestFullscreen = vi.fn(() => Promise.resolve());
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    useUIStore.setState({ playlistOpen: true });
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    const video = renderPlayer();
+
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" })));
+
+    const target = requestFullscreen.mock.contexts[0] as HTMLElement;
+    expect(target.contains(video)).toBe(true);
+    expect(target.contains(screen.getByRole("heading", { name: "Playlist" }))).toBe(true);
+    delete (HTMLElement.prototype as Partial<HTMLElement>).requestFullscreen;
   });
 
   it("says when the file is gone", async () => {

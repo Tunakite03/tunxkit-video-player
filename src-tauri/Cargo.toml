@@ -21,7 +21,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 thiserror = "2"
 walkdir = "2"
-tauri = { version = "2.12.5", features = ["protocol-asset"] }
+tauri = { version = "2.12.5", features = [] }
+percent-encoding = "2"
 tauri-plugin-log = "2.10.1"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-opener = "2.7.2"
@@ -34,7 +35,9 @@ tempfile = "3"
 tauri-plugin-single-instance = "2.5.4"
 
 [profile.release]
-panic = "abort"
+# Keep the default `panic = "unwind"`. wry catches the Objective-C exception WKWebView
+# throws when a cancelled media request is answered, and that catch only works when
+# Rust frames can unwind: with "abort" the exception terminated the app.
 codegen-units = 1
 lto = true
 opt-level = "s"

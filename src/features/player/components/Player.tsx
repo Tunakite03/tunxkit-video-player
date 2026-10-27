@@ -15,13 +15,17 @@ import { PlayerControls } from "./PlayerControls";
 const END_THRESHOLD_SECONDS = 5;
 
 interface PlayerProps {
+  /**
+   * What goes fullscreen. Only its subtree is painted in fullscreen, so it must hold
+   * everything that should stay usable there, such as the playlist beside the player.
+   */
+  fullscreenTargetRef: React.RefObject<HTMLElement | null>;
   className?: string;
 }
 
-export function Player({ className }: PlayerProps) {
+export function Player({ fullscreenTargetRef, className }: PlayerProps) {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
-  const controller = useVideoController(videoRef);
   const track = usePlaylistStore(selectCurrentTrack);
   const next = usePlaylistStore((s) => s.next);
   const prev = usePlaylistStore((s) => s.prev);
@@ -44,6 +48,7 @@ export function Player({ className }: PlayerProps) {
 
   const idle = useIdle(wrapperRef, 2500);
   const controlsVisible = paused || !idle;
+  const controller = useVideoController(videoRef, controlsVisible);
   const trackFile = track?.file;
   const trackPath = trackFile?.path;
   const errorMessage =
@@ -176,14 +181,14 @@ export function Player({ className }: PlayerProps) {
 
   /* ---------- Fullscreen ---------- */
   const toggleFullscreen = React.useCallback(() => {
-    const el = wrapperRef.current;
+    const el = fullscreenTargetRef.current;
     if (!el) return;
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     } else {
       el.requestFullscreen().catch(() => {});
     }
-  }, []);
+  }, [fullscreenTargetRef]);
 
   React.useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);

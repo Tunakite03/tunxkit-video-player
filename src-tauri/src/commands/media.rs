@@ -7,12 +7,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
 use crate::error::{AppError, AppResult};
+use crate::media_protocol::MediaAccess;
 
 /// Containers WKWebView can't play, so macOS neither lists nor associates them.
 const MACOS_UNSUPPORTED: &[&str] = &["mkv", "ogv"];
 
 /// Most videos a single scan returns. Scanning a whole drive would otherwise
-/// hold every match in memory and add each one to the asset scope.
+/// hold every match in memory and grant streaming access to each one.
 pub const MAX_SCAN_FILES: usize = 10_000;
 
 /// Containers listed in video-extensions.json (lower-case, no dot) that the webview on
@@ -148,14 +149,10 @@ pub fn media_files_from_args(
     }))
 }
 
-/// Let the webview stream these files through the asset protocol, whose static scope is empty.
+/// Let the webview stream these files through the `media://` protocol.
 pub fn allow_media(app: &AppHandle, files: &[MediaFile]) {
-    let scope = app.asset_protocol_scope();
-    for file in files {
-        if let Err(err) = scope.allow_file(&file.path) {
-            log::warn!("could not allow asset access to {}: {err}", file.path);
-        }
-    }
+    app.state::<MediaAccess>()
+        .allow(files.iter().map(|f| f.path.as_str()));
 }
 
 /// Videos the OS asked us to open (launch arguments, "Open with", a second launch).
@@ -207,8 +204,7 @@ pub async fn scan_directory(
     path: String,
     recursive: bool,
 ) -> AppResult<ScanResult> {
-    // Walking a large tree blocks, and so does granting access (it canonicalizes
-    // every path), so keep both off the async runtime's workers.
+    // Walking a large tree blocks, so keep it off the async runtime's workers.
     tauri::async_runtime::spawn_blocking(move || {
         let result = scan(Path::new(&path), recursive, MAX_SCAN_FILES)?;
         allow_media(&app, &result.files);
@@ -219,7 +215,7 @@ pub async fn scan_directory(
 
 #[tauri::command]
 pub async fn get_media_info(app: AppHandle, path: String) -> AppResult<MediaFile> {
-    // Stat and canonicalize can stall on network drives; keep them off the workers too.
+    // Stat can stall on network drives; keep it off the workers too.
     tauri::async_runtime::spawn_blocking(move || {
         let file = media_file_at(PathBuf::from(path))?;
         allow_media(&app, std::slice::from_ref(&file));

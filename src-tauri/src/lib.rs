@@ -1,12 +1,16 @@
 mod commands;
 mod error;
+mod media_protocol;
 
 use commands::media::{self, OpenQueue};
+use media_protocol::MediaAccess;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default().manage(OpenQueue::default());
+    let mut builder = tauri::Builder::default()
+        .manage(OpenQueue::default())
+        .manage(MediaAccess::default());
 
     // Must be registered first. Opening a file while the app is running hands the
     // path to the existing window instead of starting a second player.
@@ -39,6 +43,12 @@ pub fn run() {
     }
 
     builder
+        .register_asynchronous_uri_scheme_protocol(
+            media_protocol::SCHEME,
+            |ctx, request, responder| {
+                media_protocol::handle(ctx.app_handle().clone(), request, responder)
+            },
+        )
         .invoke_handler(tauri::generate_handler![
             media::scan_directory,
             media::get_media_info,

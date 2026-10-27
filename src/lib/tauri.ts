@@ -81,9 +81,9 @@ export function showInFolder(path: string): Promise<void> {
 }
 
 /**
- * Convert a local filesystem path to a URL the webview can stream. The asset
- * protocol only serves files the backend has returned from a media command.
+ * Convert a local filesystem path to a URL the webview can stream. The backend's
+ * `media://` protocol only serves files it has returned from a media command.
  */
 export function toMediaSrc(path: string): string {
-  return tauriConvertFileSrc(path);
+  return tauriConvertFileSrc(path, "media");
 }

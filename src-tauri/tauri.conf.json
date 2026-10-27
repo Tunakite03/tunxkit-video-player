@@ -28,15 +28,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
-      "devCsp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:",
-      "assetProtocol": {
-        "enable": true,
-        "scope": {
-          "allow": [],
-          "deny": []
-        }
-      }
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob:; media-src 'self' media: http://media.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob:; media-src 'self' media: http://media.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:"
     }
   },
   "bundle": {
