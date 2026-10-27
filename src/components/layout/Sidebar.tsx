@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { Home, Library, Settings, Keyboard, PlayCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useUIStore } from "@/stores/ui-store";
+import { TunxkitLogo } from "@/components/brand/TunxkitLogo";
 
 const items = [
   { to: "/", label: "Home", icon: Home },
@@ -30,9 +31,7 @@ export function Sidebar({ hidden = false }: SidebarProps) {
       aria-hidden={hidden}
     >
       <div className="flex items-center gap-2 px-3 py-3">
-        <div className="grid h-8 w-8 place-items-center rounded-md bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-soft">
-          <PlayCircle className="h-5 w-5" />
-        </div>
+        <TunxkitLogo size={32} />
         {open && (
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold leading-tight">Tunxkit</div>

@@ -7,6 +7,7 @@ import { pickFolder } from "@/lib/tauri";
 import { useLibraryStore } from "@/features/library/store";
 import { usePlaylistStore } from "@/features/playlist/store";
 import { openFiles, playRecent } from "@/features/playlist/open-media";
+import { TunxkitLogo } from "@/components/brand/TunxkitLogo";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -25,9 +26,17 @@ export function HomePage() {
     <ScrollArea className="h-full w-full">
       <div className="mx-auto max-w-5xl px-8 py-10">
         <div className="mb-10 flex flex-col items-start gap-4">
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary">
-            Welcome
-          </span>
+          <div className="flex items-center gap-3">
+            <TunxkitLogo size={46} />
+            <div className="flex flex-col">
+              <span className="w-fit rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wider text-primary">
+                Tunxkit Player
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Artisanal Hand-crafted Video Experience
+              </span>
+            </div>
+          </div>
           <h1 className="text-3xl font-semibold tracking-tight">Watch anything, beautifully.</h1>
           <p className="max-w-prose text-sm text-muted-foreground">
             Tunxkit Player is a fast, native, distraction-free video player for your local files.
