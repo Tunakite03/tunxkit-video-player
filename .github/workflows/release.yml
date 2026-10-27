@@ -10,7 +10,36 @@ permissions:
   contents: write
 
 jobs:
+  # One draft for the whole run. Letting each build create it raced: parallel jobs
+  # each made their own draft, and only one of them was published.
+  create-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - id: draft
+        run: |
+          gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
+            --title "Tunxkit Player $TAG" --notes "$NOTES"
+          id=$(gh api "repos/$REPO/releases" \
+            --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)][0].id")
+          if [[ -z "$id" || "$id" == "null" ]]; then
+            echo "::error::no draft release found for $TAG after creating it"
+            exit 1
+          fi
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          NOTES: |
+            Installers for macOS (Apple Silicon: `aarch64`, Intel: `x64`) and Windows (`.msi` or `-setup.exe`).
+
+            The macOS app is not notarized. If macOS refuses to open it, go to System Settings → Privacy & Security and choose "Open Anyway".
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -37,28 +66,21 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.target }}
       - run: npm ci
-      # Builds the installers and uploads them to a draft release for this tag.
+      # Builds the installers and uploads them to the run's draft release.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Tunxkit Player ${{ github.ref_name }}
-          releaseBody: |
-            Installers for macOS (Apple Silicon: `aarch64`, Intel: `x64`) and Windows (`.msi` or `-setup.exe`).
-
-            The macOS app is not notarized. If macOS refuses to open it, go to System Settings → Privacy & Security and choose "Open Anyway".
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
 
   publish:
-    needs: build
+    needs: [create-release, build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: gh release edit "$TAG" --repo "$REPO" --draft=false --latest
+      - run: gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F draft=false -f make_latest=true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
           REPO: ${{ github.repository }}
