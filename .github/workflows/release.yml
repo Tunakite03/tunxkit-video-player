@@ -20,12 +20,19 @@ jobs:
     steps:
       - id: draft
         run: |
-          gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
-            --title "Tunxkit Player $TAG" --notes "$NOTES"
-          id=$(gh api "repos/$REPO/releases" \
-            --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)][0].id")
-          if [[ -z "$id" || "$id" == "null" ]]; then
-            echo "::error::no draft release found for $TAG after creating it"
+          # Without the tag, creating a release would make one on the default branch.
+          gh api "repos/$REPO/git/ref/tags/$TAG" --silent
+          # A re-run reuses the draft an earlier attempt made for this tag.
+          id=$(gh api "repos/$REPO/releases?per_page=100" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\" and .draft) | .id" | head -n 1)
+          if [[ -z "$id" ]]; then
+            # Take the id from the create call: listing releases right after creating
+            # one can miss it, because the list lags behind writes.
+            id=$(gh api -X POST "repos/$REPO/releases" -f tag_name="$TAG" \
+              -f name="Tunxkit Player $TAG" -f body="$NOTES" -F draft=true --jq .id)
+          fi
+          if [[ -z "$id" ]]; then
+            echo "::error::could not create or find a draft release for $TAG"
             exit 1
           fi
           echo "release_id=$id" >> "$GITHUB_OUTPUT"
