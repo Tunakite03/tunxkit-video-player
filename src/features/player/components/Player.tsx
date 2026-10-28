@@ -1,5 +1,6 @@
 import * as React from "react";
 import { FileVideo2, TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
 import { useUIStore } from "@/stores/ui-store";
 import { cn } from "@/lib/cn";
 import { getMediaInfo, toMediaSrc } from "@/lib/tauri";
@@ -10,6 +11,10 @@ import { useVideoController } from "../hooks/use-video-controller";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useIdle } from "@/hooks/use-idle";
 import { PlayerControls } from "./PlayerControls";
+import { useSubtitleStore } from "@/features/subtitles/store";
+import { loadEmbeddedSubtitles, loadSidecarSubtitles } from "@/features/subtitles/load";
+import { useWebviewTracks } from "@/features/subtitles/hooks/use-webview-tracks";
+import { SubtitleOverlay } from "@/features/subtitles/components/SubtitleOverlay";
 
 /** Positions this close to the end count as "finished" and are not resumed. */
 const END_THRESHOLD_SECONDS = 5;
@@ -85,6 +90,21 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
       video.removeEventListener("loadedmetadata", onLoaded);
     };
   }, [pushRecent, resetMediaState, trackFile, trackPath]);
+
+  /* ---------- Subtitles: beside the video, inside it, and from the webview ---------- */
+  React.useEffect(() => {
+    useSubtitleStore.getState().resetFor(trackPath ?? null);
+    if (!trackFile) return;
+    // Failures only cost the subtitles; a missing or unreadable video already shows
+    // the playback error state.
+    loadSidecarSubtitles(trackFile).catch((error: unknown) => {
+      console.warn("subtitle discovery failed", { videoPath: trackFile.path, error });
+    });
+    loadEmbeddedSubtitles(trackFile).catch((error: unknown) => {
+      console.warn("embedded subtitle extraction failed", { videoPath: trackFile.path, error });
+    });
+  }, [trackFile, trackPath]);
+  useWebviewTracks(videoRef);
 
   /* ---------- Persist position ---------- */
   React.useEffect(() => {
@@ -272,6 +292,14 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
       case "Q":
         togglePlaylist();
         break;
+      case "c":
+      case "C":
+        if (!useSubtitleStore.getState().toggle()) {
+          toast("No subtitles for this video", {
+            description: "Load a .srt or .vtt file from the subtitles menu.",
+          });
+        }
+        break;
       case "p":
         controller.requestPiP();
         break;
@@ -309,6 +337,7 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
         preload="metadata"
         onClick={() => controller.togglePlay()}
       />
+      {track && <SubtitleOverlay videoRef={videoRef} raised={controlsVisible} />}
       {!track && <EmptyState />}
       {track && errorMessage && <ErrorState name={track.file.name} message={errorMessage} />}
 

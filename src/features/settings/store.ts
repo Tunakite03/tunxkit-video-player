@@ -31,6 +31,8 @@ export interface SettingsState {
   longSeekStepSeconds: number;
   defaultPlaybackRate: number;
   scanRecursive: boolean;
+  /** Show subtitles found next to a video as soon as it opens. */
+  subtitlesEnabled: boolean;
   setVolume: (v: number) => void;
   set: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void;
 }
@@ -45,6 +47,7 @@ export const useSettingsStore = create<SettingsState>()(
       longSeekStepSeconds: 10,
       defaultPlaybackRate: 1,
       scanRecursive: true,
+      subtitlesEnabled: true,
       setVolume: (v) =>
         set((s) => {
           s.defaultVolume = clamp(v, 0, 1);

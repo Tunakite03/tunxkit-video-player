@@ -27,6 +27,7 @@ import { usePlaylistStore } from "@/features/playlist/store";
 import { useUIStore } from "@/stores/ui-store";
 import { SeekBar } from "./SeekBar";
 import { VolumeControl } from "./VolumeControl";
+import { SubtitleMenu } from "@/features/subtitles/components/SubtitleMenu";
 import type { VideoController } from "../hooks/use-video-controller";
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -124,6 +125,7 @@ export function PlayerControls({
         </div>
 
         <div className="flex items-center gap-2 flex-1 justify-end">
+          <SubtitleMenu />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton

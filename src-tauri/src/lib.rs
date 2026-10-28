@@ -1,8 +1,10 @@
 mod commands;
+mod embedded_subtitles;
 mod error;
 mod media_protocol;
 
 use commands::media::{self, OpenQueue};
+use commands::subtitles::{self, LatestExtraction};
 use media_protocol::MediaAccess;
 use tauri::Manager;
 
@@ -10,7 +12,8 @@ use tauri::Manager;
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .manage(OpenQueue::default())
-        .manage(MediaAccess::default());
+        .manage(MediaAccess::default())
+        .manage(LatestExtraction::default());
 
     // Must be registered first. Opening a file while the app is running hands the
     // path to the existing window instead of starting a second player.
@@ -54,6 +57,9 @@ pub fn run() {
             media::get_media_info,
             media::take_pending_media_files,
             media::get_video_extensions,
+            subtitles::find_subtitle_files,
+            subtitles::read_subtitle_file,
+            subtitles::extract_embedded_subtitles,
         ])
         .setup(|app| {
             // Files passed on the command line wait in the queue until the frontend asks.

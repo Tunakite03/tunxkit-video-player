@@ -13,6 +13,9 @@ import {
   scanPaths,
 } from "@/features/playlist/open-media";
 import { toast } from "sonner";
+import { usePlaylistStore, selectCurrentTrack } from "@/features/playlist/store";
+import { loadSubtitlePaths } from "@/features/subtitles/load";
+import { subtitleFormat } from "@/features/subtitles/tracks";
 
 /** Subscribe to a Tauri event for the component's lifetime; a no-op outside Tauri. */
 function useTauriEvent<T>(event: string, handler: EventCallback<T>) {
@@ -67,6 +70,12 @@ function DropZone() {
   useTauriEvent<{ paths: string[] }>("tauri://drag-drop", async (event) => {
     const paths = event.payload?.paths ?? [];
     if (!paths.length) return;
+    // Subtitle files dropped while a video is loaded go to that video.
+    const video = selectCurrentTrack(usePlaylistStore.getState())?.file;
+    if (video && paths.every((p) => subtitleFormat(p) !== null)) {
+      await loadSubtitlePaths(video, paths);
+      return;
+    }
     // Scanning handles both dropped files (filtered to videos) and folders.
     const files = await scanPaths(paths);
     if (await playFiles(files)) announceLoaded(files.length);

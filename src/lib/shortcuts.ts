@@ -34,6 +34,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: "Shift+N", description: "Next in queue", group: "Playback" },
   { keys: "Shift+P", description: "Previous in queue", group: "Playback" },
   { keys: "Q", description: "Toggle playlist", group: "View" },
+  { keys: "C", description: "Toggle subtitles", group: "View" },
   { keys: "?", description: "Show keyboard shortcuts", group: "View" },
   { keys: "Ctrl+O", description: "Open file…", group: "Files" },
   { keys: "Ctrl+Shift+O", description: "Open folder…", group: "Files" },
