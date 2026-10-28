@@ -1,6 +1,6 @@
 [package]
 name = "tunxkit-player"
-version = "0.3.1"
+version = "0.4.0"
 description = "Tunxkit Player — a modern desktop video player built with Tauri."
 authors = ["Tunxkit"]
 license = "MIT"
