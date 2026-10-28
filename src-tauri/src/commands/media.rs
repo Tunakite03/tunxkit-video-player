@@ -49,7 +49,7 @@ pub struct ScanResult {
     pub truncated: bool,
 }
 
-fn is_video(path: &Path) -> bool {
+pub(crate) fn is_video(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| video_extensions().contains(&e.to_lowercase()))

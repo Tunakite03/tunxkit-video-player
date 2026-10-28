@@ -7,6 +7,11 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("invalid path: {0}")]
     InvalidPath(String),
+    #[error("file too large: {path} is over {limit} bytes")]
+    FileTooLarge { path: String, limit: u64 },
+    /// A newer request for the same work started, so this one stopped early.
+    #[error("superseded by a newer request")]
+    Superseded,
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
 }

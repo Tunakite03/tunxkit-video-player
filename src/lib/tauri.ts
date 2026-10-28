@@ -5,7 +5,7 @@ import { invoke, convertFileSrc as tauriConvertFileSrc } from "@tauri-apps/api/c
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { MediaFile, ScanResult } from "@/types/media";
+import type { EmbeddedSubtitleTrack, MediaFile, ScanResult, SubtitleFile } from "@/types/media";
 
 let videoExtensions: Promise<string[]> | undefined;
 
@@ -38,6 +38,23 @@ export async function pickVideoFiles(multiple = true): Promise<string[]> {
   }
 }
 
+/** Open a system file picker for subtitle files. */
+export async function pickSubtitleFiles(): Promise<string[]> {
+  if (_dialogOpen) return [];
+  _dialogOpen = true;
+  try {
+    const result = await open({
+      multiple: true,
+      directory: false,
+      filters: [{ name: "Subtitles", extensions: ["srt", "vtt"] }],
+    });
+    if (!result) return [];
+    return Array.isArray(result) ? result : [result];
+  } finally {
+    _dialogOpen = false;
+  }
+}
+
 /** Open a system folder picker. */
 export async function pickFolder(): Promise<string | null> {
   if (_dialogOpen) return null;
@@ -59,6 +76,26 @@ export function scanDirectory(path: string, recursive = true): Promise<ScanResul
 /** Fetch lightweight metadata for a single file. */
 export function getMediaInfo(path: string): Promise<MediaFile> {
   return invoke<MediaFile>("get_media_info", { path });
+}
+
+/** Subtitle files beside a video that share its name (`movie.srt`, `movie.en.vtt`, …). */
+export function findSubtitleFiles(videoPath: string): Promise<SubtitleFile[]> {
+  return invoke<SubtitleFile[]>("find_subtitle_files", { videoPath });
+}
+
+/** Raw bytes of a `.srt` / `.vtt` file; the backend refuses other files and huge ones. */
+export async function readSubtitleFile(path: string): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("read_subtitle_file", { path }));
+}
+
+/**
+ * Text subtitle streams inside a video (MKV/WebM, MP4/MOV). Null when a newer call
+ * replaced this one before it finished: only the latest extraction keeps running.
+ */
+export function extractEmbeddedSubtitles(
+  videoPath: string,
+): Promise<EmbeddedSubtitleTrack[] | null> {
+  return invoke<EmbeddedSubtitleTrack[] | null>("extract_embedded_subtitles", { videoPath });
 }
 
 /**

@@ -1,16 +1,24 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePlaylistStore } from "@/features/playlist/store";
 import { useSettingsStore } from "@/features/settings/store";
 import { PlayerPage } from "@/pages/PlayerPage";
 import { useUIStore } from "@/stores/ui-store";
+import { useSubtitleStore } from "@/features/subtitles/store";
 import type { MediaFile } from "@/types/media";
 import { usePlayerStore, useResumeStore } from "../store";
 
 const getMediaInfo = vi.hoisted(() => vi.fn());
+const findSubtitleFiles = vi.hoisted(() => vi.fn());
+const readSubtitleFile = vi.hoisted(() => vi.fn());
+const extractEmbeddedSubtitles = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/tauri", () => ({
   getMediaInfo,
+  findSubtitleFiles,
+  readSubtitleFile,
+  extractEmbeddedSubtitles,
+  pickSubtitleFiles: vi.fn(),
   showInFolder: vi.fn(),
   toMediaSrc: (path: string) => `asset://${path}`,
 }));
@@ -28,6 +36,44 @@ interface TestVideo extends HTMLVideoElement {
   /** Pretend the source loaded with this duration. */
   loaded: (duration: number) => void;
   failWith: (code: number) => void;
+}
+
+/** Stand-ins for the webview's in-band text tracks, which happy-dom doesn't model. */
+class FakeTextTrack extends EventTarget {
+  mode: TextTrackMode = "showing";
+  activeCues: Pick<VTTCue, "startTime" | "endTime" | "text">[] = [];
+  readonly kind: TextTrackKind;
+  readonly label: string;
+  readonly language: string;
+  constructor(kind: TextTrackKind, label: string, language: string) {
+    super();
+    this.kind = kind;
+    this.label = label;
+    this.language = language;
+  }
+}
+
+class FakeTextTrackList extends EventTarget {
+  length = 0;
+  [index: number]: FakeTextTrack;
+  add(track: FakeTextTrack) {
+    this[this.length++] = track;
+    act(() => void this.dispatchEvent(new Event("addtrack")));
+  }
+}
+
+const textTracksDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLMediaElement.prototype,
+  "textTracks",
+);
+
+function useFakeTextTracks(): FakeTextTrackList {
+  const list = new FakeTextTrackList();
+  Object.defineProperty(HTMLMediaElement.prototype, "textTracks", {
+    configurable: true,
+    get: () => list,
+  });
+  return list;
 }
 
 let play: ReturnType<typeof vi.fn<() => Promise<void>>>;
@@ -69,6 +115,9 @@ beforeEach(() => {
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useResumeStore.setState(useResumeStore.getInitialState(), true);
   useUIStore.setState({ playlistOpen: false });
+  useSubtitleStore.setState(useSubtitleStore.getInitialState(), true);
+  findSubtitleFiles.mockResolvedValue([]);
+  extractEmbeddedSubtitles.mockResolvedValue([]);
   play = vi.fn(() => Promise.resolve());
   vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(play);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -81,6 +130,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  if (textTracksDescriptor)
+    Object.defineProperty(HTMLMediaElement.prototype, "textTracks", textTracksDescriptor);
+  else delete (HTMLMediaElement.prototype as { textTracks?: unknown }).textTracks;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -169,6 +221,94 @@ describe("Player", () => {
     expect(target.contains(video)).toBe(true);
     expect(target.contains(screen.getByRole("heading", { name: "Playlist" }))).toBe(true);
     delete (HTMLElement.prototype as Partial<HTMLElement>).requestFullscreen;
+  });
+
+  it("shows subtitles found beside the video in time with playback, and C hides them", async () => {
+    findSubtitleFiles.mockResolvedValue([{ path: "/videos/a.en.srt", name: "a.en.srt" }]);
+    readSubtitleFile.mockResolvedValue(
+      new TextEncoder().encode("1\n00:00:01,000 --> 00:00:03,000\nHello <i>there</i>\n"),
+    );
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    const video = renderPlayer();
+    video.loaded(100);
+    await waitFor(() => expect(useSubtitleStore.getState().activeTrackId).toBe("/videos/a.en.srt"));
+    expect(findSubtitleFiles).toHaveBeenCalledWith("/videos/a.mp4");
+    expect(screen.queryByTestId("subtitle-overlay")).toBeNull();
+
+    video.currentTime = 2;
+    video.fire("timeupdate");
+    expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Hello there");
+
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "c" })));
+    expect(screen.queryByTestId("subtitle-overlay")).toBeNull();
+    expect(useSettingsStore.getState().subtitlesEnabled).toBe(false);
+
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "c" })));
+    expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Hello there");
+  });
+
+  it("keeps subtitles hidden on a new video when they were turned off", async () => {
+    useSettingsStore.getState().set("subtitlesEnabled", false);
+    findSubtitleFiles.mockResolvedValue([{ path: "/videos/a.srt", name: "a.srt" }]);
+    readSubtitleFile.mockResolvedValue(
+      new TextEncoder().encode("1\n00:00:00,000 --> 00:00:09,000\nHidden\n"),
+    );
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    renderPlayer();
+    await waitFor(() => expect(useSubtitleStore.getState().tracks).toHaveLength(1));
+    expect(useSubtitleStore.getState().activeTrackId).toBeNull();
+  });
+
+  it("offers the webview's own subtitle tracks and draws the shown one's cues", () => {
+    const list = useFakeTextTracks();
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    renderPlayer();
+    const english = new FakeTextTrack("subtitles", "", "en");
+    list.add(english);
+    list.add(new FakeTextTrack("metadata", "chapters", ""));
+
+    const { tracks, activeTrackId } = useSubtitleStore.getState();
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0]).toMatchObject({ source: "inband", label: "English" });
+    expect(activeTrackId).toBe(tracks[0].id);
+    // Loads cues for the overlay without the webview drawing them as well.
+    expect(english.mode).toBe("hidden");
+
+    english.activeCues = [{ startTime: 1, endTime: 2, text: "Xin <i>chào</i>" }];
+    act(() => void english.dispatchEvent(new Event("cuechange")));
+    expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Xin chào");
+
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "c" })));
+    expect(english.mode).toBe("disabled");
+    expect(screen.queryByTestId("subtitle-overlay")).toBeNull();
+  });
+
+  it("replaces the webview's tracks with the ones the backend read from the file", async () => {
+    const list = useFakeTextTracks();
+    extractEmbeddedSubtitles.mockResolvedValue([
+      {
+        id: 3,
+        name: null,
+        language: "vie",
+        codec: "TX3G",
+        default: true,
+        forced: false,
+        cues: [{ start: 0, end: 5, text: "Một <b>hai</b>" }],
+      },
+    ]);
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    const video = renderPlayer();
+    const webviewCopy = new FakeTextTrack("subtitles", "", "vi");
+    list.add(webviewCopy);
+
+    await waitFor(() => expect(useSubtitleStore.getState().activeTrackId).toBe("embedded:3"));
+    expect(useSubtitleStore.getState().tracks.map((t) => t.label)).toEqual(["Vietnamese"]);
+    expect(webviewCopy.mode).toBe("disabled");
+    expect(extractEmbeddedSubtitles).toHaveBeenCalledWith("/videos/a.mp4");
+
+    video.currentTime = 1;
+    video.fire("timeupdate");
+    expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Một hai");
   });
 
   it("says when the file is gone", async () => {
