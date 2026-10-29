@@ -9,7 +9,7 @@ export type SubtitleFormat = (typeof SUBTITLE_EXTENSIONS)[number];
 
 /** File name of a path with either separator. */
 export function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
+  return path.split(/[\\/]/).pop() || path;
 }
 
 function splitExtension(name: string): [stem: string, extension: string] {

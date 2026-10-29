@@ -47,6 +47,8 @@ A single folder scan returns at most 10,000 videos. If it stops there, the app s
 
 You need Node.js 24, a stable Rust toolchain and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 
+The UI needs a webview at least as new as Chrome 111 or Safari 16.4: WebView2 updates itself on Windows; on macOS (11 or later) that means Safari 16.4 or later installed; on Linux, WebKitGTK 2.40 or later.
+
 ```bash
 npm install
 npm run tauri dev      # run the app with hot reload
@@ -76,7 +78,9 @@ src-tauri/
 
 ### Security model
 
-Videos stream through the app's own `media://` protocol, which starts with nothing granted. The backend grants access only to the files it returns from a media command, so the webview can't stream anything else. The production CSP allows no network connections beyond Tauri IPC.
+Videos stream through the app's own `media://` protocol, which starts with nothing granted. The backend grants access only to the video files it returns from a media command (a folder scan, a file's metadata, or files the OS asked the app to open), so the webview can't stream anything else, and the commands that read inside a video (subtitle discovery and extraction) refuse videos that were never granted. Subtitle files themselves are read by path, limited to `.srt` / `.vtt` files of at most 10 MiB.
+
+These checks keep the webview to video and subtitle files; they don't stop a compromised webview from asking for any of those, since it chooses the paths the media commands look at. That is why the production CSP allows no scripts but the app's own and no network connections beyond Tauri IPC.
 
 ### Releasing
 

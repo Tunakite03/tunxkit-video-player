@@ -10,6 +10,7 @@ import {
   readSubtitleFile,
 } from "@/lib/tauri";
 import { usePlaylistStore, selectCurrentTrack } from "@/features/playlist/store";
+import { useSettingsStore } from "@/features/settings/store";
 import type { EmbeddedSubtitleTrack, MediaFile, SubtitleFile } from "@/types/media";
 import { decodeSubtitleBytes, parseCueText, parseSubtitles, type SubtitleCue } from "./parse";
 import { baseName, languageName, subtitleFormat, subtitleLabel } from "./tracks";
@@ -18,7 +19,9 @@ import { useSubtitleStore, type CueListTrack } from "./store";
 async function readTrack(file: SubtitleFile, video: MediaFile): Promise<CueListTrack> {
   const format = subtitleFormat(file.name);
   if (!format) throw new Error(`Not a subtitle file: ${file.name}`);
-  const cues = parseSubtitles(decodeSubtitleBytes(await readSubtitleFile(file.path)));
+  const bytes = await readSubtitleFile(file.path);
+  const encoding = useSettingsStore.getState().subtitleEncoding;
+  const cues = parseSubtitles(decodeSubtitleBytes(bytes, encoding));
   return {
     id: file.path,
     source: "file",

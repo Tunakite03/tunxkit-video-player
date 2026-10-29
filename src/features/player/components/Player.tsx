@@ -7,7 +7,7 @@ import { getMediaInfo, toMediaSrc } from "@/lib/tauri";
 import { useSettingsStore } from "@/features/settings/store";
 import { usePlayerStore, useResumeStore } from "../store";
 import { usePlaylistStore, selectCurrentTrack } from "@/features/playlist/store";
-import { useVideoController } from "../hooks/use-video-controller";
+import { startPlayback, useVideoController } from "../hooks/use-video-controller";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useIdle } from "@/hooks/use-idle";
 import { PlayerControls } from "./PlayerControls";
@@ -25,10 +25,12 @@ interface PlayerProps {
    * everything that should stay usable there, such as the playlist beside the player.
    */
   fullscreenTargetRef: React.RefObject<HTMLElement | null>;
+  /** On screen. While hidden behind another page it keeps playing but takes no shortcuts. */
+  active: boolean;
   className?: string;
 }
 
-export function Player({ fullscreenTargetRef, className }: PlayerProps) {
+export function Player({ fullscreenTargetRef, active, className }: PlayerProps) {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const track = usePlaylistStore(selectCurrentTrack);
@@ -52,7 +54,7 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
   } | null>(null);
 
   const idle = useIdle(wrapperRef, 2500);
-  const controlsVisible = paused || !idle;
+  const controlsVisible = active && (paused || !idle);
   const controller = useVideoController(videoRef, controlsVisible);
   const trackFile = track?.file;
   const trackPath = trackFile?.path;
@@ -82,7 +84,7 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
       if (resumeAt && Number.isFinite(resumeAt) && resumeAt < duration - END_THRESHOLD_SECONDS) {
         video.currentTime = resumeAt;
       }
-      video.play().catch(() => {});
+      startPlayback(video);
     };
     video.addEventListener("loadedmetadata", onLoaded, { once: true });
     pushRecent(trackFile);
@@ -203,11 +205,8 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
   const toggleFullscreen = React.useCallback(() => {
     const el = fullscreenTargetRef.current;
     if (!el) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else {
-      el.requestFullscreen().catch(() => {});
-    }
+    const change = document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen();
+    change.catch((error: unknown) => console.warn("fullscreen could not be toggled", { error }));
   }, [fullscreenTargetRef]);
 
   React.useEffect(() => {
@@ -316,7 +315,7 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
         }
       }
     }
-  });
+  }, active);
 
   return (
     <div
@@ -337,7 +336,8 @@ export function Player({ fullscreenTargetRef, className }: PlayerProps) {
         preload="metadata"
         onClick={() => controller.togglePlay()}
       />
-      {track && <SubtitleOverlay videoRef={videoRef} raised={controlsVisible} />}
+      {/* Unmounted while hidden: it follows the video every animation frame. */}
+      {track && active && <SubtitleOverlay videoRef={videoRef} raised={controlsVisible} />}
       {!track && <EmptyState />}
       {track && errorMessage && <ErrorState name={track.file.name} message={errorMessage} />}
 

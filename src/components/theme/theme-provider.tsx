@@ -1,6 +1,7 @@
 import * as React from "react";
 
-type Theme = "light" | "dark" | "system";
+const THEMES = ["light", "dark", "system"] as const;
+type Theme = (typeof THEMES)[number];
 
 interface ThemeContextValue {
   theme: Theme;
@@ -31,7 +32,8 @@ export function ThemeProvider({
 }) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
     if (typeof window === "undefined") return defaultTheme;
-    return (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? defaultTheme;
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return THEMES.find((t) => t === stored) ?? defaultTheme;
   });
 
   const [systemTheme, setSystemTheme] = React.useState<"light" | "dark">(getSystemTheme);

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { useSettingsStore } from "@/features/settings/store";
+import { isRecord } from "@/lib/persisted";
 
 const clamp = (value: number, min: number, max: number) =>
   Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min;
@@ -88,6 +89,16 @@ export const usePlayerStore = create<PlayerState>()(
   })),
 );
 
+/** Stored positions that are real times, the most recent `MAX_POSITIONS` of them. */
+function restorePositions(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  const valid = Object.entries(value).filter(
+    (entry): entry is [string, number] =>
+      entry[0] !== "" && typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] > 0,
+  );
+  return Object.fromEntries(valid.slice(-MAX_POSITIONS));
+}
+
 interface ResumeState {
   /** Map of path → last playback position in seconds, least recently updated first. */
   positions: Record<string, number>;
@@ -121,7 +132,7 @@ export const useResumeStore = create<ResumeState>()(
       partialize: (s) => ({ positions: s.positions }),
       merge: (persisted, current) => ({
         ...current,
-        positions: (persisted as Partial<ResumeState> | undefined)?.positions ?? {},
+        positions: isRecord(persisted) ? restorePositions(persisted.positions) : {},
       }),
     },
   ),

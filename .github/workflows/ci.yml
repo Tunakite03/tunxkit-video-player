@@ -28,15 +28,17 @@ jobs:
 
   rust:
     # macOS too: it has its own code path for files opened from Finder and its own config.
+    # Windows too: its drive-letter, backslash paths go through media:// percent-encoded.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
       run:
         working-directory: src-tauri
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       # Only what compiling and testing needs; bundling an AppImage would also need patchelf.

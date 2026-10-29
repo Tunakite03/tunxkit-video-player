@@ -8,14 +8,22 @@ export interface Thumbnail {
 
 interface QueueItem {
   path: string;
+  /** Callers still waiting. At zero an item that hasn't started is dropped undecoded. */
+  waiters: number;
   resolve: (thumb: Thumbnail) => void;
+}
+
+interface Pending {
+  item: QueueItem;
+  promise: Promise<Thumbnail>;
 }
 
 const EMPTY: Thumbnail = { dataUrl: null, duration: null };
 const CACHE = new Map<string, Thumbnail>();
-const PENDING = new Map<string, Promise<Thumbnail>>();
+const PENDING = new Map<string, Pending>();
 const MAX_CACHE = 256;
 const MAX_CONCURRENT = 2;
+/** Waiting requests, oldest first. The newest starts first: it's what just scrolled into view. */
 const queue: QueueItem[] = [];
 let active = 0;
 
@@ -29,7 +37,7 @@ function setCache(path: string, thumb: Thumbnail) {
 
 function pump() {
   while (active < MAX_CONCURRENT && queue.length) {
-    const item = queue.shift()!;
+    const item = queue.pop()!;
     active++;
     extractFrame(item.path)
       .then((thumb) => {
@@ -101,19 +109,44 @@ function extractFrame(path: string): Promise<Thumbnail> {
   });
 }
 
-export function getThumbnail(path: string): Promise<Thumbnail> {
+/**
+ * Preview frame for `path`, decoded at most once. Aborting `signal` withdraws this
+ * caller; a request nobody waits for any more is dropped (resolving empty, uncached)
+ * if its decode hasn't started.
+ */
+export function getThumbnail(path: string, signal?: AbortSignal): Promise<Thumbnail> {
   const cached = CACHE.get(path);
   if (cached) return Promise.resolve(cached);
-  const pending = PENDING.get(path);
-  if (pending) return pending;
-  const promise = new Promise<Thumbnail>((resolve) => {
-    queue.push({ path, resolve });
-    pump();
-  }).finally(() => {
-    PENDING.delete(path);
-  });
-  PENDING.set(path, promise);
-  return promise;
+  if (signal?.aborted) return Promise.resolve(EMPTY);
+  let pending = PENDING.get(path);
+  if (!pending) {
+    let resolve: (thumb: Thumbnail) => void = () => {};
+    const promise = new Promise<Thumbnail>((r) => (resolve = r)).finally(() => {
+      PENDING.delete(path);
+    });
+    pending = { item: { path, waiters: 0, resolve }, promise };
+    PENDING.set(path, pending);
+    queue.push(pending.item);
+  }
+  const { item } = pending;
+  item.waiters++;
+  signal?.addEventListener(
+    "abort",
+    () => {
+      item.waiters--;
+      const index = queue.indexOf(item);
+      if (item.waiters === 0 && index >= 0) {
+        queue.splice(index, 1);
+        // Forget it now, not when the promise settles: a request for the same path
+        // in the meantime must queue afresh rather than share this empty result.
+        PENDING.delete(path);
+        item.resolve(EMPTY);
+      }
+    },
+    { once: true },
+  );
+  pump();
+  return pending.promise;
 }
 
 export function getCachedThumbnail(path: string): Thumbnail | undefined {

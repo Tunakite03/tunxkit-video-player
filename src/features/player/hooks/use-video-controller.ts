@@ -8,6 +8,18 @@ const DEFAULT_FRAME_SECONDS = 1 / 30;
  */
 const LIVE_PROGRESS_INTERVAL_MS = 30;
 
+/**
+ * Start playback. A play() cut short by a pause or a new source rejects with an
+ * AbortError, which is expected; anything else is logged. A source that can't play
+ * also fires `error`, which the player shows.
+ */
+export function startPlayback(video: HTMLVideoElement): void {
+  video.play().catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    console.warn("playback did not start", { src: video.currentSrc, error });
+  });
+}
+
 /** Fraction (0..1) of the media buffered around the current playback position. */
 function bufferedFraction(video: HTMLVideoElement): number {
   const { buffered, duration, currentTime } = video;
@@ -186,10 +198,13 @@ export function useVideoController(
       togglePlay: () => {
         const v = videoRef.current;
         if (!v || !v.currentSrc) return;
-        if (v.paused || v.ended) v.play().catch(() => {});
+        if (v.paused || v.ended) startPlayback(v);
         else v.pause();
       },
-      play: () => videoRef.current?.play().catch(() => {}),
+      play: () => {
+        const v = videoRef.current;
+        if (v) startPlayback(v);
+      },
       pause: () => videoRef.current?.pause(),
       seekTo,
       seekBy: (delta: number) => {
@@ -211,7 +226,7 @@ export function useVideoController(
         const v = videoRef.current;
         if (!v || !v.currentSrc) return;
         seekTo(0);
-        v.play().catch(() => {});
+        startPlayback(v);
       },
       setVolume: (vol: number) => {
         const v = videoRef.current;
@@ -235,8 +250,8 @@ export function useVideoController(
           if (document.pictureInPictureElement) await document.exitPictureInPicture();
           else if ("requestPictureInPicture" in v)
             await (v as HTMLVideoElement).requestPictureInPicture();
-        } catch {
-          /* unsupported */
+        } catch (error) {
+          console.warn("picture-in-picture could not be toggled", { error });
         }
       },
     };

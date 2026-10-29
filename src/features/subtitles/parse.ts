@@ -148,18 +148,76 @@ export function parseSubtitles(source: string): SubtitleCue[] {
   return cues.sort((a, b) => a.start - b.start);
 }
 
+/** Legacy encodings older subtitle files use, by their WHATWG Encoding labels. */
+export const SUBTITLE_ENCODINGS = [
+  { id: "windows-1252", label: "Western (Windows-1252)" },
+  { id: "windows-1258", label: "Vietnamese (Windows-1258)" },
+  { id: "windows-1250", label: "Central European (Windows-1250)" },
+  { id: "windows-1251", label: "Cyrillic (Windows-1251)" },
+  { id: "windows-1253", label: "Greek (Windows-1253)" },
+  { id: "windows-1254", label: "Turkish (Windows-1254)" },
+  { id: "windows-1255", label: "Hebrew (Windows-1255)" },
+  { id: "windows-1256", label: "Arabic (Windows-1256)" },
+  { id: "windows-874", label: "Thai (Windows-874)" },
+  { id: "gbk", label: "Chinese, Simplified (GBK)" },
+  { id: "big5", label: "Chinese, Traditional (Big5)" },
+  { id: "shift_jis", label: "Japanese (Shift_JIS)" },
+  { id: "euc-kr", label: "Korean (EUC-KR)" },
+] as const;
+
+export type SubtitleEncoding = (typeof SUBTITLE_ENCODINGS)[number]["id"];
+
+export function isSubtitleEncoding(value: unknown): value is SubtitleEncoding {
+  return SUBTITLE_ENCODINGS.some((e) => e.id === value);
+}
+
+/** Primary language subtag → the legacy encoding its old files most likely use. */
+const LANGUAGE_ENCODINGS: Record<string, SubtitleEncoding> = {
+  vi: "windows-1258",
+  cs: "windows-1250",
+  hr: "windows-1250",
+  hu: "windows-1250",
+  pl: "windows-1250",
+  ro: "windows-1250",
+  sk: "windows-1250",
+  sl: "windows-1250",
+  bg: "windows-1251",
+  mk: "windows-1251",
+  ru: "windows-1251",
+  sr: "windows-1251",
+  uk: "windows-1251",
+  el: "windows-1253",
+  tr: "windows-1254",
+  he: "windows-1255",
+  ar: "windows-1256",
+  fa: "windows-1256",
+  th: "windows-874",
+  ja: "shift_jis",
+  ko: "euc-kr",
+};
+
+/** The fallback encoding to start with for a UI in `language` (a BCP 47 tag). */
+export function defaultSubtitleEncoding(language: string): SubtitleEncoding {
+  const [primary = "", region = ""] = language.toLowerCase().split("-");
+  if (primary === "zh") {
+    return ["tw", "hk", "mo", "hant"].includes(region) ? "big5" : "gbk";
+  }
+  return LANGUAGE_ENCODINGS[primary] ?? "windows-1252";
+}
+
 /**
  * Text of a subtitle file. A BOM decides; otherwise UTF-8 when the bytes are valid
- * UTF-8, else Windows-1252, the usual encoding of older Western .srt files.
+ * UTF-8, else `fallback`. The result is NFC-normalized: Windows-1258 stores Vietnamese
+ * tone marks as separate combining characters.
  */
-export function decodeSubtitleBytes(bytes: Uint8Array): string {
+export function decodeSubtitleBytes(bytes: Uint8Array, fallback: SubtitleEncoding): string {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
   if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (err) {
     if (!(err instanceof TypeError)) throw err;
-    return new TextDecoder("windows-1252").decode(bytes);
+    return new TextDecoder(fallback).decode(bytes).normalize("NFC");
   }
 }
 

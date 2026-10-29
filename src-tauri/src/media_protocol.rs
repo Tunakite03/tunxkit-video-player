@@ -19,6 +19,8 @@ use tauri::http::header::{
 use tauri::http::{HeaderValue, Method, Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, UriSchemeResponder};
 
+use crate::error::{AppError, AppResult};
+
 pub const SCHEME: &str = "media";
 
 /// Most bytes one response carries. Bigger chunks mean fewer round trips through
@@ -42,6 +44,15 @@ impl MediaAccess {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .contains(path)
+    }
+
+    /// Fails unless `path` is a granted video, for commands that read inside one.
+    pub fn require(&self, path: &str) -> AppResult<()> {
+        if self.is_allowed(path) {
+            Ok(())
+        } else {
+            Err(AppError::NotGranted(path.to_string()))
+        }
     }
 }
 
@@ -338,6 +349,17 @@ mod tests {
         let sneaky = dir.path().join("sub").join("..").join("other.mp4");
         assert_eq!(get(&access, &sneaky, None).status(), StatusCode::FORBIDDEN);
         assert_eq!(get(&access, &granted, None).status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn require_accepts_only_granted_paths() {
+        let access = MediaAccess::default();
+        access.allow(["/v/ok.mp4"]);
+        assert!(access.require("/v/ok.mp4").is_ok());
+        assert!(matches!(
+            access.require("/v/other.mp4"),
+            Err(AppError::NotGranted(path)) if path == "/v/other.mp4"
+        ));
     }
 
     #[test]

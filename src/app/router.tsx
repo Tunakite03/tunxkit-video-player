@@ -1,12 +1,10 @@
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import * as React from "react";
 import { AppShell } from "@/components/layout/AppShell";
+import { RouteError } from "@/components/layout/RouteError";
 
 const HomePage = React.lazy(() =>
   import("@/pages/HomePage").then((m) => ({ default: m.HomePage })),
-);
-const PlayerPage = React.lazy(() =>
-  import("@/pages/PlayerPage").then((m) => ({ default: m.PlayerPage })),
 );
 const LibraryPage = React.lazy(() =>
   import("@/pages/LibraryPage").then((m) => ({ default: m.LibraryPage })),
@@ -27,15 +25,25 @@ const wrap = (node: React.ReactNode) => (
   <React.Suspense fallback={<Loading />}>{node}</React.Suspense>
 );
 
+/** A page that fails to render shows the error inside the shell, sidebar still usable. */
+const pageError = <RouteError />;
+
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <AppShell />,
+    // The shell itself, the player it holds, or an unknown path.
+    errorElement: (
+      <div className="h-screen w-screen">
+        <RouteError />
+      </div>
+    ),
     children: [
-      { index: true, element: wrap(<HomePage />) },
-      { path: "player", element: wrap(<PlayerPage />) },
-      { path: "library", element: wrap(<LibraryPage />) },
-      { path: "settings", element: wrap(<SettingsPage />) },
+      { index: true, element: wrap(<HomePage />), errorElement: pageError },
+      // AppShell draws the player itself and keeps it mounted across pages.
+      { path: "player", element: null },
+      { path: "library", element: wrap(<LibraryPage />), errorElement: pageError },
+      { path: "settings", element: wrap(<SettingsPage />), errorElement: pageError },
     ],
   },
 ]);

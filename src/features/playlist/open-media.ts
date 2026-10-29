@@ -13,6 +13,7 @@ import {
   takePendingMediaFiles,
 } from "@/lib/tauri";
 import { useSettingsStore } from "@/features/settings/store";
+import { baseName } from "@/features/subtitles/tracks";
 import type { MediaFile } from "@/types/media";
 import { usePlaylistStore } from "./store";
 
@@ -24,10 +25,31 @@ export async function playFiles(files: MediaFile[], startIndex = 0): Promise<boo
   return true;
 }
 
-/** Metadata for each path; paths that are gone or aren't videos are skipped. */
-export async function mediaInfoFor(paths: string[]): Promise<MediaFile[]> {
-  const files = await Promise.all(paths.map((p) => getMediaInfo(p).catch(() => null)));
-  return files.filter((f): f is MediaFile => f !== null);
+/** Videos found for a set of paths, and the paths that couldn't be read at all. */
+export interface Found {
+  files: MediaFile[];
+  failed: { path: string; error: unknown }[];
+}
+
+/** Results of `read` on each path, split into what it returned and the paths it failed on. */
+async function readEach<T>(
+  paths: string[],
+  read: (path: string) => Promise<T>,
+): Promise<{ results: T[]; failed: Found["failed"] }> {
+  const settled = await Promise.allSettled(paths.map(read));
+  const results: T[] = [];
+  const failed: Found["failed"] = [];
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled") results.push(r.value);
+    else failed.push({ path: paths[i], error: r.reason });
+  });
+  return { results, failed };
+}
+
+/** Metadata for each path; paths that are gone or aren't videos are listed as failed. */
+export async function mediaInfoFor(paths: string[]): Promise<Found> {
+  const { results, failed } = await readEach(paths, getMediaInfo);
+  return { files: results, failed };
 }
 
 /** Toast for a scan that hit the backend's file cap. */
@@ -35,29 +57,53 @@ export function warnTruncatedScan() {
   toast.warning("Some folders have too many videos, so only part of them was loaded");
 }
 
-/** Video files in each path: folders are scanned (per settings), files are filtered to videos. */
-export async function scanPaths(paths: string[]): Promise<MediaFile[]> {
+/**
+ * Video files in each path: folders are scanned (per settings), files are filtered to
+ * videos. Paths that can't be read (gone, no permission) are listed as failed.
+ */
+export async function scanPaths(paths: string[]): Promise<Found> {
   const recursive = useSettingsStore.getState().scanRecursive;
-  const results = await Promise.all(
-    paths.map((p) => scanDirectory(p, recursive).catch(() => ({ files: [], truncated: false }))),
-  );
+  const { results, failed } = await readEach(paths, (p) => scanDirectory(p, recursive));
   if (results.some((r) => r.truncated)) warnTruncatedScan();
-  return results.flatMap((r) => r.files);
+  return { files: results.flatMap((r) => r.files), failed };
+}
+
+/** "a.mp4", or "3 items: a.mp4, b.mp4, c.mp4", naming at most three. */
+function describeItems(paths: string[]): string {
+  const names = paths.map(baseName);
+  if (names.length === 1) return names[0];
+  const shown = names.slice(0, 3).join(", ");
+  return `${names.length} items: ${shown}${names.length > 3 ? ", …" : ""}`;
+}
+
+/**
+ * Play what was found and report what couldn't be read; `nothingFound` is the error
+ * when every path was read but held no video. Returns whether anything plays.
+ */
+export async function playFound({ files, failed }: Found, nothingFound: string): Promise<boolean> {
+  if (failed.length > 0) console.warn("items could not be opened", { items: failed });
+  const unread =
+    failed.length > 0 ? `Couldn't open ${describeItems(failed.map((f) => f.path))}` : null;
+  if (!(await playFiles(files))) {
+    toast.error(unread ?? nothingFound);
+    return false;
+  }
+  if (unread) toast.warning(unread);
+  return true;
 }
 
 /** Pick video files with the system dialog and play them. */
 export async function openFiles(): Promise<void> {
   const paths = await pickVideoFiles(true);
   if (!paths.length) return;
-  if (!(await playFiles(await mediaInfoFor(paths))))
-    toast.error("Couldn't open the selected files");
+  await playFound(await mediaInfoFor(paths), "Couldn't open the selected files");
 }
 
 /** Pick a folder with the system dialog and play the videos in it. */
 export async function openFolder(): Promise<void> {
   const folder = await pickFolder();
   if (!folder) return;
-  if (!(await playFiles(await scanPaths([folder])))) toast.error("No videos found in that folder");
+  await playFound(await scanPaths([folder]), "No videos found in that folder");
 }
 
 /** Re-check a remembered file (it may be gone, and needs asset access again) and play it. */
