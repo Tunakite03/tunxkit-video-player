@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
+import { isRecord, toMediaFile } from "@/lib/persisted";
 import type { MediaFile, RepeatMode, Track } from "@/types/media";
 
 function makeTrack(file: MediaFile): Track {
@@ -9,6 +10,9 @@ function makeTrack(file: MediaFile): Track {
 
 /** Cap on remembered steps for "previous". */
 const MAX_HISTORY = 200;
+
+/** Cap on recently played files. */
+const MAX_RECENT = 30;
 
 /** Drop repeated paths — track ids are paths and must stay unique. */
 function uniqueByPath(files: MediaFile[]): MediaFile[] {
@@ -176,7 +180,7 @@ export const usePlaylistStore = create<PlaylistState>()(
 
       pushRecent: (file) =>
         set((s) => {
-          s.recent = [file, ...s.recent.filter((r) => r.path !== file.path)].slice(0, 30);
+          s.recent = [file, ...s.recent.filter((r) => r.path !== file.path)].slice(0, MAX_RECENT);
         }),
     })),
     {
@@ -187,6 +191,21 @@ export const usePlaylistStore = create<PlaylistState>()(
         shuffle: s.shuffle,
         repeat: s.repeat,
       }),
+      merge: (persisted, current) => {
+        if (!isRecord(persisted)) return current;
+        const { recent, shuffle, repeat } = persisted;
+        return {
+          ...current,
+          recent: Array.isArray(recent)
+            ? recent
+                .map(toMediaFile)
+                .filter((f): f is MediaFile => f !== null)
+                .slice(0, MAX_RECENT)
+            : current.recent,
+          shuffle: typeof shuffle === "boolean" ? shuffle : current.shuffle,
+          repeat: REPEAT_ORDER.find((mode) => mode === repeat) ?? current.repeat,
+        };
+      },
     },
   ),
 );

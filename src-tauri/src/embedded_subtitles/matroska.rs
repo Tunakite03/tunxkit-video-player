@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::io::{self, BufReader, ErrorKind, Read, Seek};
 
 use super::{
-    ass_event_text, check, finish_cues, seconds, EmbeddedTrack, PendingCue, MAX_SAMPLE_BYTES,
+    ass_event_text, check, finish_cues, seconds, EmbeddedTrack, PendingCue, MAX_SAMPLES_PER_TRACK,
+    MAX_SAMPLE_BYTES,
 };
 use crate::error::{AppError, AppResult};
 
@@ -372,14 +373,16 @@ fn step<R: Read + Seek>(walk: &mut Walk, r: &mut BufReader<R>) -> io::Result<Ste
                 skip(r, payload)?;
                 return Ok(Step::Continue);
             };
-            if laced || payload > MAX_SAMPLE_BYTES {
+            if laced || payload > MAX_SAMPLE_BYTES || track.cues.len() >= MAX_SAMPLES_PER_TRACK {
                 skip(r, payload)?;
                 return Ok(Step::Continue);
             }
             let mut data = vec![0u8; payload as usize];
             r.read_exact(&mut data)?;
             let relative = i16::from_be_bytes([rest[0], rest[1]]) as i128;
-            let ticks = (walk.cluster_time as i128 + relative).max(0) * walk.scale_ns as i128;
+            let ticks = (walk.cluster_time as i128 + relative)
+                .max(0)
+                .saturating_mul(walk.scale_ns as i128);
             track.cues.push(PendingCue {
                 start: seconds(ticks, 1_000_000_000),
                 end: None,
@@ -392,7 +395,7 @@ fn step<R: Read + Seek>(walk: &mut Walk, r: &mut BufReader<R>) -> io::Result<Ste
             if let Some((number, index)) = walk.group_cue.take() {
                 let track = walk.tracks.get_mut(&number);
                 if let Some(cue) = track.and_then(|t| t.cues.get_mut(index)) {
-                    let ticks = duration as i128 * walk.scale_ns as i128;
+                    let ticks = (duration as i128).saturating_mul(walk.scale_ns as i128);
                     cue.end = Some(cue.start + seconds(ticks, 1_000_000_000));
                 }
             }

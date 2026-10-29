@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { cuesAt, decodeSubtitleBytes, parseSubtitles, SubtitleParseError } from "./parse";
-import { subtitleFormat, subtitleLabel } from "./tracks";
+import {
+  cuesAt,
+  decodeSubtitleBytes,
+  defaultSubtitleEncoding,
+  parseSubtitles,
+  SubtitleParseError,
+} from "./parse";
+import { baseName, subtitleFormat, subtitleLabel } from "./tracks";
 
 const text = (cue: { lines: { text: string }[][] }) =>
   cue.lines.map((line) => line.map((s) => s.text).join(""));
@@ -73,16 +79,36 @@ describe("cuesAt", () => {
 });
 
 describe("decodeSubtitleBytes", () => {
-  it("decodes UTF-8, and UTF-16 by its BOM", () => {
-    expect(decodeSubtitleBytes(new TextEncoder().encode("Xin chào"))).toBe("Xin chào");
+  it("decodes UTF-8, and UTF-16 by its BOM, whatever the fallback", () => {
+    const utf8 = new TextEncoder().encode("Xin chào");
+    expect(decodeSubtitleBytes(utf8, "windows-1258")).toBe("Xin chào");
     const le = new Uint8Array([0xff, 0xfe, 0x48, 0x00, 0xe9, 0x00]);
-    expect(decodeSubtitleBytes(le)).toBe("Hé");
+    expect(decodeSubtitleBytes(le, "windows-1252")).toBe("Hé");
     const be = new Uint8Array([0xfe, 0xff, 0x00, 0x48, 0x00, 0xe9]);
-    expect(decodeSubtitleBytes(be)).toBe("Hé");
+    expect(decodeSubtitleBytes(be, "windows-1252")).toBe("Hé");
   });
 
-  it("falls back to Windows-1252 for bytes that aren't UTF-8", () => {
-    expect(decodeSubtitleBytes(new Uint8Array([0x43, 0x61, 0x66, 0xe9]))).toBe("Café");
+  it("uses the fallback encoding for bytes that aren't UTF-8", () => {
+    expect(decodeSubtitleBytes(new Uint8Array([0x43, 0x61, 0x66, 0xe9]), "windows-1252")).toBe(
+      "Café",
+    );
+    // Windows-1258 keeps tone marks as combining characters: ê + U+0301, ê + U+0323.
+    const vietnamese = [0x54, 0x69, 0xea, 0xec, 0x6e, 0x67, 0x20, 0x56, 0x69, 0xea, 0xf2, 0x74];
+    const text = decodeSubtitleBytes(new Uint8Array(vietnamese), "windows-1258");
+    expect(text).toBe("Tiếng Việt");
+    expect(text).toBe(text.normalize("NFC"));
+  });
+});
+
+describe("defaultSubtitleEncoding", () => {
+  it("picks the legacy encoding of the UI language", () => {
+    expect(defaultSubtitleEncoding("vi-VN")).toBe("windows-1258");
+    expect(defaultSubtitleEncoding("ru")).toBe("windows-1251");
+    expect(defaultSubtitleEncoding("zh-CN")).toBe("gbk");
+    expect(defaultSubtitleEncoding("zh-TW")).toBe("big5");
+    expect(defaultSubtitleEncoding("zh-Hant")).toBe("big5");
+    expect(defaultSubtitleEncoding("en-US")).toBe("windows-1252");
+    expect(defaultSubtitleEncoding("")).toBe("windows-1252");
   });
 });
 
@@ -100,5 +126,11 @@ describe("subtitle naming", () => {
     expect(subtitleFormat("/subs/a.vtt")).toBe("vtt");
     expect(subtitleFormat("/subs/a.ass")).toBeNull();
     expect(subtitleFormat("/subs/srt")).toBeNull();
+  });
+
+  it("takes the last path segment, on either separator, or the whole path without one", () => {
+    expect(baseName("/movies/a.srt")).toBe("a.srt");
+    expect(baseName("C:\\Movies\\Old Drive")).toBe("Old Drive");
+    expect(baseName("/")).toBe("/");
   });
 });

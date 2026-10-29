@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePlayerStore } from "../store";
-import { useVideoController } from "./use-video-controller";
+import { startPlayback, useVideoController } from "./use-video-controller";
 
 /** Animation frames that only run when the test says so. */
 let frames: Map<number, FrameRequestCallback>;
@@ -72,5 +72,29 @@ describe("useVideoController live progress", () => {
     media.currentTime = 5;
     runFrame(2000);
     expect(usePlayerStore.getState().currentTime).toBe(0);
+  });
+});
+
+describe("startPlayback", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("ignores a play() cut short by a pause or a new source, and logs other failures", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const video = document.createElement("video");
+    const play = vi.spyOn(video, "play");
+
+    play.mockRejectedValueOnce(new DOMException("interrupted", "AbortError"));
+    startPlayback(video);
+    await flush();
+    expect(warn).not.toHaveBeenCalled();
+
+    const blocked = new DOMException("not allowed", "NotAllowedError");
+    play.mockRejectedValueOnce(blocked);
+    startPlayback(video);
+    await flush();
+    expect(warn).toHaveBeenCalledWith(
+      "playback did not start",
+      expect.objectContaining({ error: blocked }),
+    );
   });
 });

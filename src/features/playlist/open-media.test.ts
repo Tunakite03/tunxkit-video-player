@@ -17,7 +17,7 @@ vi.mock("sonner", () => ({ toast }));
 vi.mock("@/app/router", () => ({ router: { navigate } }));
 
 import { usePlaylistStore } from "./store";
-import { mediaInfoFor, playRecent, receiveOpenedFiles, scanPaths } from "./open-media";
+import { mediaInfoFor, playFound, playRecent, receiveOpenedFiles, scanPaths } from "./open-media";
 
 const file = (name: string): MediaFile => ({
   path: `/videos/${name}`,
@@ -91,13 +91,15 @@ describe("receiveOpenedFiles", () => {
 });
 
 describe("scanPaths", () => {
-  it("merges every path's videos and skips paths that fail", async () => {
+  it("merges every path's videos and lists the paths that fail", async () => {
+    const gone = new Error("gone");
     tauri.scanDirectory.mockImplementation(async (path: string) => {
-      if (path === "/bad") throw new Error("gone");
+      if (path === "/bad") throw gone;
       return { files: [file(`${path.slice(1)}.mp4`)], truncated: false };
     });
-    const files = await scanPaths(["/a", "/bad", "/b"]);
-    expect(files.map((f) => f.name)).toEqual(["a.mp4", "b.mp4"]);
+    const found = await scanPaths(["/a", "/bad", "/b"]);
+    expect(found.files.map((f) => f.name)).toEqual(["a.mp4", "b.mp4"]);
+    expect(found.failed).toEqual([{ path: "/bad", error: gone }]);
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
@@ -109,13 +111,42 @@ describe("scanPaths", () => {
 });
 
 describe("mediaInfoFor", () => {
-  it("skips paths the backend rejects", async () => {
+  it("lists the paths the backend rejects", async () => {
     tauri.getMediaInfo.mockImplementation(async (path: string) => {
       if (path.endsWith(".txt")) throw new Error("not a video");
       return file(path.slice(1));
     });
-    const files = await mediaInfoFor(["/a.mp4", "/notes.txt", "/b.mp4"]);
-    expect(files.map((f) => f.name)).toEqual(["a.mp4", "b.mp4"]);
+    const found = await mediaInfoFor(["/a.mp4", "/notes.txt", "/b.mp4"]);
+    expect(found.files.map((f) => f.name)).toEqual(["a.mp4", "b.mp4"]);
+    expect(found.failed.map((f) => f.path)).toEqual(["/notes.txt"]);
+  });
+});
+
+describe("playFound", () => {
+  const failed = (...paths: string[]) => paths.map((path) => ({ path, error: new Error("x") }));
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("plays what was found and warns about what couldn't be read", async () => {
+    const found = { files: [file("a.mp4")], failed: failed("/x/gone.mp4") };
+    expect(await playFound(found, "nothing")).toBe(true);
+    expect(queued()).toEqual(["a.mp4"]);
+    expect(toast.warning).toHaveBeenCalledWith("Couldn't open gone.mp4");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("names at most three unreadable items", async () => {
+    const found = { files: [], failed: failed("/a", "C:\\v\\b", "/c", "/d") };
+    expect(await playFound(found, "nothing")).toBe(false);
+    expect(toast.error).toHaveBeenCalledWith("Couldn't open 4 items: a, b, c, …");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("says nothing was found when every path was read but held no video", async () => {
+    expect(await playFound({ files: [], failed: [] }, "No videos found")).toBe(false);
+    expect(toast.error).toHaveBeenCalledWith("No videos found");
   });
 });
 

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Root as SwitchRoot, Thumb as SwitchThumb } from "@radix-ui/react-switch";
 import { usePlayerStore } from "@/features/player/store";
+import { isSubtitleEncoding, SUBTITLE_ENCODINGS } from "@/features/subtitles/parse";
 import { useSettingsStore } from "../store";
 import { cn } from "@/lib/cn";
 
@@ -162,6 +163,32 @@ export function SettingsView() {
             {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
               <option key={r} value={r}>
                 {r}×
+              </option>
+            ))}
+          </select>
+        </Row>
+      </section>
+
+      <section className="mt-6 rounded-lg border border-border bg-card px-4">
+        <h2 className="-mx-4 border-b border-border bg-muted/50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Subtitles
+        </h2>
+        <Row
+          label="Encoding of older subtitle files"
+          description="Used for .srt and .vtt files that aren't Unicode. Applies to subtitles loaded after the change."
+        >
+          <select
+            aria-label="Encoding of older subtitle files"
+            value={s.subtitleEncoding}
+            onChange={(e) => {
+              const encoding = e.target.value;
+              if (isSubtitleEncoding(encoding)) s.set("subtitleEncoding", encoding);
+            }}
+            className="h-9 max-w-56 rounded-md border border-border bg-input/40 px-2 text-sm"
+          >
+            {SUBTITLE_ENCODINGS.map((encoding) => (
+              <option key={encoding.id} value={encoding.id}>
+                {encoding.label}
               </option>
             ))}
           </select>

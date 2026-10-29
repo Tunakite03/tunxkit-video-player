@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a version tag (e.g. v0.3.1) builds the app for macOS and Windows and
+# Pushing a version tag (e.g. v0.3.1) builds the app for macOS, Windows and Linux and
 # publishes a GitHub release once every build has uploaded its installers.
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
           NOTES: |
-            Installers for macOS (Apple Silicon: `aarch64`, Intel: `x64`) and Windows (`.msi` or `-setup.exe`).
+            Installers for macOS (Apple Silicon: `aarch64`, Intel: `x64`), Windows (`.msi` or `-setup.exe`) and Linux (`.deb`, `.rpm` or `.AppImage`).
 
             The macOS app is not notarized. If macOS refuses to open it, go to System Settings → Privacy & Security and choose "Open Anyway".
 
@@ -57,10 +57,18 @@ jobs:
             target: x86_64-apple-darwin
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+          # The oldest supported runner: an older glibc lets the build run on more distros.
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev patchelf
       - uses: actions/setup-node@v4
         with:
           node-version: 24

@@ -8,18 +8,28 @@ export function useThumbnail(path: string | null | undefined, enabled = true): T
 
   React.useEffect(() => {
     if (!path || !enabled || cached) return;
-    let cancelled = false;
-    getThumbnail(path).then((t) => {
-      if (!cancelled) setGenerated(t);
+    // Aborting withdraws the request, so a card scrolled past before its turn
+    // doesn't hold up the ones on screen.
+    const controller = new AbortController();
+    getThumbnail(path, controller.signal).then((t) => {
+      if (!controller.signal.aborted) setGenerated(t);
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [path, enabled, cached]);
 
   return cached ?? generated;
 }
 
+/**
+ * The scroll area viewport holding `el`, or null for the window. Observers need it as
+ * their root: the viewport clips its content, so a margin around the window would
+ * never see anything just outside the scroll area's visible part.
+ */
+export function scrollRootOf(el: Element): Element | null {
+  return el.closest("[data-radix-scroll-area-viewport]");
+}
+
+/** Whether the element is on screen (or within 200px of it), kept current while scrolling. */
 export function useInView<T extends Element>(options?: IntersectionObserverInit) {
   const ref = React.useRef<T | null>(null);
   const [inView, setInView] = React.useState(false);
@@ -29,15 +39,10 @@ export function useInView<T extends Element>(options?: IntersectionObserverInit)
     if (!el) return;
     const obs = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) {
-            setInView(true);
-            obs.disconnect();
-            break;
-          }
-        }
+        const last = entries[entries.length - 1];
+        if (last) setInView(last.isIntersecting);
       },
-      { rootMargin: "200px", threshold: 0.01, ...options },
+      { root: scrollRootOf(el), rootMargin: "200px", threshold: 0.01, ...options },
     );
     obs.observe(el);
     return () => obs.disconnect();

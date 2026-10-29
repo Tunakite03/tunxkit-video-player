@@ -1,5 +1,6 @@
 import * as React from "react";
 import { FolderPlus, FilePlus, RefreshCw, Search, FolderOpen, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,7 +9,38 @@ import { pickFolder, scanDirectory } from "@/lib/tauri";
 import { useLibraryStore } from "../store";
 import { useSettingsStore } from "@/features/settings/store";
 import { openFiles, playFiles, warnTruncatedScan } from "@/features/playlist/open-media";
+import { baseName } from "@/features/subtitles/tracks";
+import { scrollRootOf } from "@/hooks/use-thumbnail";
 import { LibraryCard } from "./LibraryCard";
+
+/** Cards added to the grid at a time; more follow as the end scrolls into view. */
+export const LIBRARY_PAGE_SIZE = 120;
+
+/**
+ * Calls `onVisible` when the element behind the returned ref is on screen (or within
+ * 400px). A new `watch` value looks again, even if it never left the screen; null stops.
+ */
+function useOnVisible<T extends Element>(onVisible: () => void, watch: number | null) {
+  const ref = React.useRef<T | null>(null);
+  const callback = React.useRef(onVisible);
+  React.useEffect(() => {
+    callback.current = onVisible;
+  }, [onVisible]);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || watch === null) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) callback.current();
+      },
+      { root: scrollRootOf(el), rootMargin: "400px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [watch]);
+  return ref;
+}
 
 export function LibraryView() {
   const folders = useLibraryStore((s) => s.folders);
@@ -37,9 +69,19 @@ export function LibraryView() {
       const results = await Promise.allSettled(
         folders.map((f) => scanDirectory(f.path, scanRecursive)),
       );
-      const failed = results.filter((result) => result.status === "rejected");
+      const failed = folders.filter((_, i) => results[i].status === "rejected");
       if (failed.length > 0) {
-        console.warn(`Failed to scan ${failed.length} library folder(s).`, failed);
+        console.warn("library folders could not be scanned", {
+          folders: failed.map((f) => f.path),
+          errors: results.flatMap((r) => (r.status === "rejected" ? [r.reason] : [])),
+        });
+        const names = failed.map((f) => baseName(f.path)).join(", ");
+        toast.error(
+          failed.length === 1
+            ? `Couldn't scan the folder ${names}`
+            : `Couldn't scan ${failed.length} folders: ${names}`,
+          { description: "It may have been moved, renamed, or disconnected." },
+        );
       }
       const scanned = results.flatMap((result) =>
         result.status === "fulfilled" ? [result.value] : [],
@@ -74,6 +116,19 @@ export function LibraryView() {
     return items.filter((i) => i.name.toLowerCase().includes(q));
   }, [items, query]);
 
+  // A library can hold tens of thousands of videos: render them a page at a time, and
+  // start over from the first page whenever the list changes.
+  const [shown, setShown] = React.useState({ list: filtered, count: LIBRARY_PAGE_SIZE });
+  if (shown.list !== filtered) setShown({ list: filtered, count: LIBRARY_PAGE_SIZE });
+  const hasMore = shown.count < filtered.length;
+  const showMore = React.useCallback(
+    () => setShown((s) => ({ ...s, count: s.count + LIBRARY_PAGE_SIZE })),
+    [],
+  );
+  // Looks again after each page, so a page that leaves the end on screen loads the next.
+  const endRef = useOnVisible<HTMLDivElement>(showMore, hasMore ? shown.count : null);
+  const visible = filtered.slice(0, shown.count);
+
   return (
     <section className="flex h-full w-full min-w-0 flex-col">
       <header className="flex items-center gap-2 border-b border-border px-6 py-3">
@@ -87,7 +142,12 @@ export function LibraryView() {
           />
         </div>
         <div className="flex items-center gap-1">
-          <IconButton label="Refresh" size="icon-sm" onClick={refresh}>
+          <IconButton
+            label="Refresh"
+            size="icon-sm"
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </IconButton>
           <Button variant="outline" size="sm" onClick={() => void openFiles()}>
@@ -115,7 +175,7 @@ export function LibraryView() {
                 >
                   <FolderOpen className="h-4 w-4 text-muted-foreground" />
                   <span className="flex-1 truncate" title={f.path}>
-                    {f.path.split(/[\\/]/).pop() || f.path}
+                    {baseName(f.path)}
                   </span>
                   <IconButton
                     label="Remove"
@@ -138,7 +198,7 @@ export function LibraryView() {
 
         <ScrollArea className="flex-1">
           <div className="grid gap-3 p-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((item, index) => (
+            {visible.map((item, index) => (
               <LibraryCard
                 key={item.path}
                 item={item}
@@ -161,6 +221,7 @@ export function LibraryView() {
               </div>
             )}
           </div>
+          {hasMore && <div ref={endRef} data-testid="library-more" className="h-px" aria-hidden />}
         </ScrollArea>
       </div>
     </section>

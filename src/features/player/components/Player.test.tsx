@@ -77,13 +77,17 @@ function useFakeTextTracks(): FakeTextTrackList {
 }
 
 let play: ReturnType<typeof vi.fn<() => Promise<void>>>;
+/** Show the rendered player page, or hide it as the app shell does behind another page. */
+let showPage: (active: boolean) => void;
 
 function renderPlayer(): TestVideo {
-  const { container } = render(
+  const page = (active: boolean) => (
     <TooltipProvider>
-      <PlayerPage />
-    </TooltipProvider>,
+      <PlayerPage active={active} />
+    </TooltipProvider>
   );
+  const { container, rerender } = render(page(true));
+  showPage = (active) => rerender(page(active));
   const video = container.querySelector("video") as TestVideo;
   let currentTime = 0;
   const media = { duration: NaN, readyState: 0, error: null as { code: number } | null };
@@ -204,6 +208,25 @@ describe("Player", () => {
     expect(video.currentTime).toBe(57);
   });
 
+  it("keeps the video playing, without taking shortcuts, while another page shows", () => {
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    const video = renderPlayer();
+    video.loaded(100);
+    video.currentTime = 50;
+    play.mockClear();
+
+    showPage(false);
+    expect(document.querySelector("video")).toBe(video);
+    expect(video.getAttribute("src")).toBe("asset:///videos/a.mp4");
+    expect(play).not.toHaveBeenCalled();
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
+    expect(video.currentTime).toBe(50);
+
+    showPage(true);
+    act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })));
+    expect(video.currentTime).toBe(55);
+  });
+
   it("goes fullscreen with the whole page, so the open playlist stays visible", () => {
     // happy-dom has no Fullscreen API; record which element asked for it.
     const requestFullscreen = vi.fn(() => Promise.resolve());
@@ -245,6 +268,25 @@ describe("Player", () => {
 
     act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "c" })));
     expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Hello there");
+  });
+
+  it("stops drawing subtitles while hidden and brings them back on return", async () => {
+    findSubtitleFiles.mockResolvedValue([{ path: "/videos/a.en.srt", name: "a.en.srt" }]);
+    readSubtitleFile.mockResolvedValue(
+      new TextEncoder().encode("1\n00:00:01,000 --> 00:00:30,000\nStill here\n"),
+    );
+    usePlaylistStore.getState().setQueue([file("a.mp4")]);
+    const video = renderPlayer();
+    video.loaded(100);
+    await waitFor(() => expect(useSubtitleStore.getState().activeTrackId).toBe("/videos/a.en.srt"));
+    video.currentTime = 2;
+    video.fire("timeupdate");
+    expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Still here");
+
+    showPage(false);
+    expect(screen.queryByTestId("subtitle-overlay")).toBeNull();
+    showPage(true);
+    expect(screen.getByTestId("subtitle-overlay").textContent).toBe("Still here");
   });
 
   it("keeps subtitles hidden on a new video when they were turned off", async () => {

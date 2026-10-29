@@ -109,6 +109,59 @@ describe("getThumbnail", () => {
     await Promise.all(results);
   });
 
+  it("starts the most recently requested file first", async () => {
+    const results = ["/v/1.mp4", "/v/2.mp4", "/v/3.mp4", "/v/4.mp4"].map((p) =>
+      thumbnails.getThumbnail(p),
+    );
+    videos[0].decode(20);
+    await results[0];
+    await flush();
+    expect(videos[2].src).toBe("asset:///v/4.mp4");
+  });
+
+  it("drops a queued request nobody waits for, without decoding or caching it", async () => {
+    const running = ["/v/1.mp4", "/v/2.mp4"].map((p) => thumbnails.getThumbnail(p));
+    const scrolledPast = new AbortController();
+    const dropped = thumbnails.getThumbnail("/v/3.mp4", scrolledPast.signal);
+    const shared = new AbortController();
+    const kept = thumbnails.getThumbnail("/v/4.mp4", shared.signal);
+    const alsoWaiting = thumbnails.getThumbnail("/v/4.mp4");
+
+    scrolledPast.abort();
+    shared.abort();
+    expect(await dropped).toEqual({ dataUrl: null, duration: null });
+    expect(thumbnails.getCachedThumbnail("/v/3.mp4")).toBeUndefined();
+
+    // "/v/4.mp4" still has a waiter, so it is decoded next; "/v/3.mp4" never is.
+    videos[0].decode(20);
+    videos[1].decode(20);
+    await Promise.all(running);
+    await flush();
+    expect(videos.map((v) => v.src).slice(2)).toEqual(["asset:///v/4.mp4"]);
+    videos[2].decode(30);
+    expect((await alsoWaiting).duration).toBe(30);
+    expect(await kept).toEqual(await alsoWaiting);
+    await flush();
+    expect(videos).toHaveLength(3);
+  });
+
+  it("queues a path afresh when it is requested again right after being dropped", async () => {
+    const running = ["/v/1.mp4", "/v/2.mp4"].map((p) => thumbnails.getThumbnail(p));
+    const remount = new AbortController();
+    const dropped = thumbnails.getThumbnail("/v/3.mp4", remount.signal);
+    // Same tick, as when an effect is cleaned up and run again in one commit.
+    remount.abort();
+    const again = thumbnails.getThumbnail("/v/3.mp4");
+    expect(await dropped).toEqual({ dataUrl: null, duration: null });
+
+    videos[0].decode(20);
+    await Promise.all([running[0]]);
+    await flush();
+    expect(videos[2].src).toBe("asset:///v/3.mp4");
+    videos[2].decode(40);
+    expect((await again).duration).toBe(40);
+  });
+
   it("resolves an empty thumbnail for a broken file and remembers the failure", async () => {
     const pending = thumbnails.getThumbnail("/v/broken.mp4");
     videos[0].fail();

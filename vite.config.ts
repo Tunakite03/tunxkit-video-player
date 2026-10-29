@@ -42,7 +42,8 @@ export default defineConfig(
       },
       envPrefix: ["VITE_", "TAURI_ENV_*"],
       build: {
-        target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
+        // Tailwind CSS 4 needs Chrome 111 / Safari 16.4; nothing older renders the UI.
+        target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome111" : "safari16.4",
         minify: process.env.TAURI_ENV_DEBUG ? false : "oxc",
         sourcemap: !!process.env.TAURI_ENV_DEBUG,
       },

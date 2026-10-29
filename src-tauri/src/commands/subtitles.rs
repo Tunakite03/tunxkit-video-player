@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager};
 use super::media::is_video;
 use crate::embedded_subtitles::{self, EmbeddedTrack};
 use crate::error::{AppError, AppResult};
+use crate::media_protocol::MediaAccess;
 
 /// Sidecar subtitle formats the frontend can parse (lower-case, no dot).
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "vtt"];
@@ -90,9 +91,13 @@ fn read_subtitle(path: &Path, limit: u64) -> AppResult<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Subtitle files beside a video, named after it (`movie.srt`, `movie.en.vtt`, …).
+/// Subtitle files beside a granted video, named after it (`movie.srt`, `movie.en.vtt`, …).
 #[tauri::command]
-pub async fn find_subtitle_files(video_path: String) -> AppResult<Vec<SubtitleFile>> {
+pub async fn find_subtitle_files(
+    app: AppHandle,
+    video_path: String,
+) -> AppResult<Vec<SubtitleFile>> {
+    app.state::<MediaAccess>().require(&video_path)?;
     // Listing a folder can stall on network drives; keep it off the async workers.
     tauri::async_runtime::spawn_blocking(move || sidecars(Path::new(&video_path))).await?
 }
@@ -112,13 +117,14 @@ pub async fn read_subtitle_file(path: String) -> AppResult<Response> {
 #[derive(Default)]
 pub struct LatestExtraction(AtomicU64);
 
-/// Text subtitle streams inside a video. `None` when a newer extraction started
+/// Text subtitle streams inside a granted video. `None` when a newer extraction started
 /// before this one finished: the caller has moved on to another video.
 #[tauri::command]
 pub async fn extract_embedded_subtitles(
     app: AppHandle,
     video_path: String,
 ) -> AppResult<Option<Vec<EmbeddedTrack>>> {
+    app.state::<MediaAccess>().require(&video_path)?;
     // Walking a large Matroska file blocks; keep it off the async workers.
     tauri::async_runtime::spawn_blocking(move || {
         let latest = &app.state::<LatestExtraction>().0;

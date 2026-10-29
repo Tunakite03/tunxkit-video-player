@@ -8,11 +8,10 @@ import {
   announceLoaded,
   openFiles,
   openFolder,
-  playFiles,
+  playFound,
   receiveOpenedFiles,
   scanPaths,
 } from "@/features/playlist/open-media";
-import { toast } from "sonner";
 import { usePlaylistStore, selectCurrentTrack } from "@/features/playlist/store";
 import { loadSubtitlePaths } from "@/features/subtitles/load";
 import { subtitleFormat } from "@/features/subtitles/tracks";
@@ -77,9 +76,10 @@ function DropZone() {
       return;
     }
     // Scanning handles both dropped files (filtered to videos) and folders.
-    const files = await scanPaths(paths);
-    if (await playFiles(files)) announceLoaded(files.length);
-    else toast.error("No supported videos in the dropped items");
+    const found = await scanPaths(paths);
+    if (await playFound(found, "No supported videos in the dropped items")) {
+      announceLoaded(found.files.length);
+    }
   });
   return null;
 }

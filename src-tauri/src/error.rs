@@ -7,6 +7,9 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("invalid path: {0}")]
     InvalidPath(String),
+    /// The path was never handed out by a media command, so the webview may not use it.
+    #[error("access not granted: {0}")]
+    NotGranted(String),
     #[error("file too large: {path} is over {limit} bytes")]
     FileTooLarge { path: String, limit: u64 },
     /// A newer request for the same work started, so this one stopped early.

@@ -4,8 +4,10 @@
 
 use std::io::{self, BufReader, ErrorKind, Read, Seek, SeekFrom};
 
-use super::{check, finish_cues, seconds, EmbeddedTrack, PendingCue, MAX_SAMPLE_BYTES};
-use crate::error::AppResult;
+use super::{
+    check, finish_cues, seconds, EmbeddedTrack, PendingCue, MAX_SAMPLES_PER_TRACK, MAX_SAMPLE_BYTES,
+};
+use crate::error::{AppError, AppResult};
 
 /// `moov` of a multi-hour video is a few MB of sample tables; this is far beyond that.
 const MAX_MOOV_BYTES: u64 = 128 * 1024 * 1024;
@@ -192,11 +194,21 @@ fn edit_shift(elst: Option<&[u8]>, movie_scale: u32, media_scale: u32) -> io::Re
     Ok(empty)
 }
 
-/// File offset and size of every sample, from the chunk tables.
+/// File offset and size of every sample, from the chunk tables, up to
+/// `MAX_SAMPLES_PER_TRACK`.
 fn sample_locations(stbl: &[u8]) -> io::Result<Vec<(u64, u32)>> {
     let stsz = find(stbl, &[b"stsz"])?.ok_or_else(|| invalid("missing stsz"))?;
     let fixed = be_u32(stsz, 4)?;
-    let count = be_u32(stsz, 8)? as usize;
+    // The stated count is untrusted: a table of sizes can't list more entries than it
+    // holds, and a fixed size can't vouch for any count, so the cap bounds both.
+    let listed = if fixed != 0 {
+        usize::MAX
+    } else {
+        stsz.len().saturating_sub(12) / 4
+    };
+    let count = (be_u32(stsz, 8)? as usize)
+        .min(listed)
+        .min(MAX_SAMPLES_PER_TRACK);
     let size_of = |i: usize| -> io::Result<u32> {
         if fixed != 0 {
             Ok(fixed)
@@ -218,7 +230,7 @@ fn sample_locations(stbl: &[u8]) -> io::Result<Vec<(u64, u32)>> {
     let stsc = find(stbl, &[b"stsc"])?.ok_or_else(|| invalid("missing stsc"))?;
     let runs = be_u32(stsc, 4)? as usize;
 
-    let mut locations = Vec::with_capacity(count.min(1 << 20));
+    let mut locations = Vec::with_capacity(count);
     for run in 0..runs {
         let first_chunk = be_u32(stsc, 8 + run * 12)? as usize;
         let per_chunk = be_u32(stsc, 12 + run * 12)? as usize;
@@ -235,7 +247,7 @@ fn sample_locations(stbl: &[u8]) -> io::Result<Vec<(u64, u32)>> {
                 }
                 let size = size_of(locations.len())?;
                 locations.push((offset, size));
-                offset += size as u64;
+                offset = offset.saturating_add(size as u64);
             }
         }
     }
@@ -245,7 +257,7 @@ fn sample_locations(stbl: &[u8]) -> io::Result<Vec<(u64, u32)>> {
 /// Each sample's (decode time, duration) in media units, from `stts`.
 fn sample_times(stbl: &[u8], count: usize) -> io::Result<Vec<(u64, u32)>> {
     let stts = find(stbl, &[b"stts"])?.ok_or_else(|| invalid("missing stts"))?;
-    let mut times = Vec::with_capacity(count.min(1 << 20));
+    let mut times = Vec::with_capacity(count.min(MAX_SAMPLES_PER_TRACK));
     let mut time = 0u64;
     for i in 0..be_u32(stts, 4)? as usize {
         let run = be_u32(stts, 8 + i * 8)?;
@@ -255,7 +267,7 @@ fn sample_times(stbl: &[u8], count: usize) -> io::Result<Vec<(u64, u32)>> {
                 return Ok(times);
             }
             times.push((time, delta));
-            time += delta as u64;
+            time = time.saturating_add(delta as u64);
         }
     }
     Ok(times)
@@ -346,11 +358,22 @@ fn read_track<R: Read + Seek>(
     let locations = sample_locations(track.stbl)?;
     let times = sample_times(track.stbl, locations.len())?;
     let scale = track.media_scale.max(1) as u64;
+    let file_len = r.seek(SeekFrom::End(0))?;
     let mut cues = Vec::new();
     for (&(offset, size), &(time, duration)) in locations.iter().zip(&times) {
         check(superseded)?;
         if size == 0 || size as u64 > MAX_SAMPLE_BYTES {
             continue;
+        }
+        // A file cut off before its last samples, or tables pointing nowhere: keep the
+        // cues read up to there. Checked up front, since seeking that far can fail
+        // outright rather than leave a short read.
+        if offset.saturating_add(size as u64) > file_len {
+            log::warn!(
+                "mp4 subtitle track {} points past the end of the file; keeping the cues read so far",
+                track.id
+            );
+            break;
         }
         let mut sample = vec![0u8; size as usize];
         r.seek(SeekFrom::Start(offset))?;
@@ -360,9 +383,10 @@ fn read_track<R: Read + Seek>(
             TextFormat::WebVtt => webvtt_text(&sample)?,
         };
         let start = seconds(time as i128, scale) + track.shift;
+        let end = time.saturating_add(duration as u64);
         cues.push(PendingCue {
             start: start.max(0.0),
-            end: Some(seconds((time + duration as u64) as i128, scale) + track.shift),
+            end: Some(seconds(end as i128, scale) + track.shift),
             text,
         });
     }
@@ -396,12 +420,17 @@ pub fn extract<R: Read + Seek>(
         if &kind != b"trak" {
             continue;
         }
-        let Some(info) = track_info(trak, movie_scale)? else {
-            continue;
-        };
-        let track = read_track(r, &info, superseded)?;
-        if !track.cues.is_empty() {
-            out.push(track);
+        // One malformed track costs only itself, not the file's other subtitles.
+        match track_info(trak, movie_scale)
+            .map_err(AppError::from)
+            .and_then(|info| {
+                info.map(|info| read_track(r, &info, superseded))
+                    .transpose()
+            }) {
+            Ok(Some(track)) if !track.cues.is_empty() => out.push(track),
+            Ok(_) => {}
+            Err(AppError::Superseded) => return Err(AppError::Superseded),
+            Err(err) => log::warn!("skipping unreadable mp4 subtitle track: {err}"),
         }
     }
     Ok(out)
@@ -538,6 +567,123 @@ mod tests {
         assert_eq!(language(100), None);
         let utf16: Vec<u8> = [&[0x00, 0x06, 0xFE, 0xFF][..], &[0x00, b'H', 0x00, 0xE9]].concat();
         assert_eq!(timed_text(&utf16), "Hé");
+    }
+
+    #[test]
+    fn sample_tables_claiming_billions_of_samples_are_capped() {
+        // One chunk of 2^32-1 one-byte samples, all in one time run.
+        let hostile = [
+            full(b"stsz", &u32s(&[1, u32::MAX])),
+            full(b"stco", &u32s(&[1, 0])),
+            full(b"stsc", &u32s(&[1, 1, u32::MAX, 1])),
+            full(b"stts", &u32s(&[1, u32::MAX, 1])),
+        ]
+        .concat();
+        let locations = sample_locations(&hostile).unwrap();
+        assert_eq!(locations.len(), MAX_SAMPLES_PER_TRACK);
+        assert_eq!(
+            sample_times(&hostile, locations.len()).unwrap().len(),
+            MAX_SAMPLES_PER_TRACK
+        );
+
+        // A size table can't vouch for more samples than it lists.
+        let overstated = [
+            full(b"stsz", &u32s(&[0, 1_000_000, 4, 4])),
+            full(b"stco", &u32s(&[1, 0])),
+            full(b"stsc", &u32s(&[1, 1, 1_000_000, 1])),
+        ]
+        .concat();
+        assert_eq!(sample_locations(&overstated).unwrap(), [(0, 4), (4, 4)]);
+    }
+
+    #[test]
+    fn a_truncated_or_broken_track_keeps_what_can_be_read() {
+        let ftyp = bx(b"ftyp", b"isom\0\0\0\0");
+        let (one, two) = (tx3g("one"), tx3g("two"));
+        let mdat = bx(b"mdat", &[one.clone(), two.clone()].concat());
+        let start = (ftyp.len() + 8) as u64;
+        let whole = trak(
+            2,
+            b"sbtl",
+            b"tx3g",
+            &[
+                (one.len() as u32, 1000, start),
+                (two.len() as u32, 1000, start + one.len() as u64),
+            ],
+        );
+        // Its second sample lies past the end of the file.
+        let cut = trak(
+            3,
+            b"sbtl",
+            b"tx3g",
+            &[
+                (one.len() as u32, 1000, start),
+                (two.len() as u32, 1000, 1 << 30),
+            ],
+        );
+        // A subtitle handler but no track header.
+        let broken = bx(
+            b"trak",
+            &bx(
+                b"mdia",
+                &full(b"hdlr", &[&[0u8; 4][..], b"sbtl", &[0u8; 13][..]].concat()),
+            ),
+        );
+        let moov = bx(b"moov", &[broken, whole, cut].concat());
+        let file = [ftyp, mdat, moov].concat();
+
+        let found = extract(&mut BufReader::new(Cursor::new(file)), &|| false).unwrap();
+        let texts: Vec<(u64, Vec<&str>)> = found
+            .iter()
+            .map(|t| (t.id, t.cues.iter().map(|c| c.text.as_str()).collect()))
+            .collect();
+        assert_eq!(texts, [(2, vec!["one", "two"]), (3, vec!["one"])]);
+    }
+
+    #[test]
+    fn samples_beyond_any_seekable_offset_end_the_track_without_failing_it() {
+        let ftyp = bx(b"ftyp", b"isom\0\0\0\0");
+        let one = tx3g("one");
+        let mdat = bx(b"mdat", &one);
+        let start = (ftyp.len() + 8) as u64;
+        let size = one.len() as u32;
+        let tkhd = bx(
+            b"tkhd",
+            &[&[0, 0, 0, 1][..], &u32s(&[0, 0, 2, 0])[..], &[0u8; 64][..]].concat(),
+        );
+        let mdhd = full(b"mdhd", &[&u32s(&[0, 0, 1000, 0])[..], &[0u8; 4]].concat());
+        let hdlr = full(b"hdlr", &[&[0u8; 4][..], b"sbtl", &[0u8; 13][..]].concat());
+        let stsd = full(
+            b"stsd",
+            &[&u32s(&[1])[..], &bx(b"tx3g", &[0u8; 8])[..]].concat(),
+        );
+        let stts = full(b"stts", &u32s(&[1, 2, 1000]));
+        let stsc = full(b"stsc", &u32s(&[1, 1, 1, 1]));
+        let stsz = full(b"stsz", &u32s(&[0, 2, size, size]));
+        // The second chunk sits at an offset no file can have: seeking there fails.
+        let co64 = full(
+            b"co64",
+            &[
+                &u32s(&[2])[..],
+                &start.to_be_bytes(),
+                &u64::MAX.to_be_bytes(),
+            ]
+            .concat(),
+        );
+        let stbl = bx(b"stbl", &[stsd, stts, stsc, stsz, co64].concat());
+        let mdia = bx(b"mdia", &[mdhd, hdlr, bx(b"minf", &stbl)].concat());
+        let moov = bx(b"moov", &bx(b"trak", &[tkhd, mdia].concat()));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("far.mp4");
+        std::fs::write(&path, [ftyp, mdat, moov].concat()).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let found = extract(&mut BufReader::new(file), &|| false).unwrap();
+        let texts: Vec<&str> = found
+            .iter()
+            .flat_map(|t| t.cues.iter().map(|c| c.text.as_str()))
+            .collect();
+        assert_eq!(texts, ["one"]);
     }
 
     #[test]

@@ -18,6 +18,10 @@ use crate::error::{AppError, AppResult};
 /// Largest single subtitle sample read; anything bigger is not a line of text.
 const MAX_SAMPLE_BYTES: u64 = 1024 * 1024;
 
+/// Most samples read from one track. A feature film has a few thousand; the cap keeps
+/// a malformed file's sample tables, which can claim billions, from exhausting memory.
+const MAX_SAMPLES_PER_TRACK: usize = 100_000;
+
 /// How long a cue without a stated duration stays up when no later cue ends it.
 const FALLBACK_CUE_SECONDS: f64 = 5.0;
 
